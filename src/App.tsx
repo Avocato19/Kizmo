@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, FolderOpen, ImagePlus, Layers3, ListChecks, Pencil, Plus, RotateCcw, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from 'react';
+import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Pencil, Plus, RotateCcw, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { readSnapshot } from './storage';
 import { supabase, supabaseConfigured } from './lib/supabase';
 
@@ -12,6 +12,11 @@ type Point = { x: number; y: number };
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
 type MaskEdit = { id: string; mode: 'move' | 'resize'; corner?: Corner; start: Point; original: Mask };
 const corners: Corner[] = ['nw', 'ne', 'sw', 'se'];
+const flashcardCheers = ['Goodjob babyyy🥰', 'Gooo my beloved wifey😘', 'I love you babyyy😍', "You're doing good, my love🥰"];
+const randomFlashcardCheer = (previous?: string) => {
+  const options = flashcardCheers.filter(message => message !== previous);
+  return options[Math.floor(Math.random() * options.length)];
+};
 const answerLabel = (index: number) => {
   let value = index + 1;
   let label = '';
@@ -73,6 +78,21 @@ const passageSegments = (text: string, marks: Mask[]) => {
   return parts;
 };
 
+const confettiColors = ['#e9a0ad', '#a8c7a7', '#c5b4df', '#f3cf8c', '#9bcbd1', '#f3b7a4'];
+function ConfettiCelebration() {
+  return <div className="confetti-layer" aria-hidden="true">{Array.from({ length: 42 }, (_, index) => <i
+    className={`confetti-piece confetti-piece-${index % 3}`}
+    key={index}
+    style={{
+      left: `${(index * 47 + 11) % 100}%`,
+      animationDelay: `${(index % 14) * 0.07}s`,
+      animationDuration: `${2.5 + (index % 4) * 0.35}s`,
+      backgroundColor: confettiColors[index % confettiColors.length],
+      '--drift': `${((index * 31) % 180) - 90}px`,
+    } as CSSProperties}
+  />)}</div>;
+}
+
 function App() {
   const [sets, setSets] = useState<StudySet[]>([]);
   const [folders, setFolders] = useState<StudyFolder[]>([]);
@@ -86,6 +106,7 @@ function App() {
   const [practiceTasks, setPracticeTasks] = useState<PracticeTask[]>([]);
   const [practiceTaskIndex, setPracticeTaskIndex] = useState(0);
   const [mixedPractice, setMixedPractice] = useState(false);
+  const [folderPracticeComplete, setFolderPracticeComplete] = useState(false);
   const [singleQuestion, setSingleQuestion] = useState(false);
   const [image, setImage] = useState('');
   const [imageRatio, setImageRatio] = useState(4 / 3);
@@ -94,6 +115,7 @@ function App() {
   const [flashcardFrontDraft, setFlashcardFrontDraft] = useState('');
   const [flashcardBackDraft, setFlashcardBackDraft] = useState('');
   const [flashcardRevealed, setFlashcardRevealed] = useState(false);
+  const [flashcardCheer, setFlashcardCheer] = useState(() => randomFlashcardCheer());
   const [blankTextDraft, setBlankTextDraft] = useState('');
   const [confirmedBlankText, setConfirmedBlankText] = useState('');
   const [blankTextConfirmed, setBlankTextConfirmed] = useState(false);
@@ -112,11 +134,15 @@ function App() {
   const [cardIndex, setCardIndex] = useState(0);
   const [questionDraft, setQuestionDraft] = useState('');
   const [answerDraft, setAnswerDraft] = useState('');
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfQuestionCount, setPdfQuestionCount] = useState(10);
+  const [generatingPdfQuiz, setGeneratingPdfQuiz] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const backupRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const pdfRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const blankPassageRef = useRef<HTMLDivElement>(null);
   const activeMask = active?.masks[cardIndex % (active.masks.length || 1)];
@@ -129,6 +155,10 @@ function App() {
   const blankEditorSegments = passageSegments(confirmedBlankText, masks);
   const activeBlankMarks = active?.masks.filter(mark => mark.start !== undefined && mark.end !== undefined).sort((a, b) => a.start! - b.start!) ?? [];
   const blankPracticeSegments = passageSegments(active?.content ?? '', active?.masks ?? []);
+  const lastPracticeTask = !mixedPractice || practiceTaskIndex === practiceTasks.length - 1;
+  const shouldCelebrate = folderPracticeComplete || (active?.kind === 'flashcard'
+    ? quizComplete && lastPracticeTask
+    : lastPracticeTask && (quizComplete || pictureSubmitted || (singleQuestion && choiceChecked)));
 
   const loadSets = async () => {
     try {
@@ -187,7 +217,7 @@ function App() {
   const startCreate = (kind: 'quiz' | 'flashcard' = 'quiz') => {
     if (!folderId) { setError('Open a folder first.'); return; }
     setImage(''); setMasks([]); setSelectedMask(null);
-    setQuestionDraft(''); setAnswerDraft(''); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setSelectedTextRange(null); setCreateKind(kind); setQuizType('picture'); setView('create'); setError('');
+    setQuestionDraft(''); setAnswerDraft(''); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setSelectedTextRange(null); setPdfFile(null); setPdfQuestionCount(10); setCreateKind(kind); setQuizType('picture'); setView('create'); setError('');
   };
   const changeQuizType = (type: 'picture' | 'text' | 'fillblank') => {
     setQuizType(type); setImage(''); setMasks([]); setSelectedMask(null); setError('');
@@ -254,6 +284,33 @@ function App() {
     const card: Mask = { id: crypto.randomUUID(), x: 0, y: 0, w: 0, h: 0, question: questionDraft.trim(), answer: answerDraft.trim() };
     setMasks(previous => [...previous, card]); setQuestionDraft(''); setAnswerDraft(''); setError('');
   };
+  const generatePdfQuiz = async () => {
+    if (!pdfFile) { setError('Choose a PDF first.'); return; }
+    if (pdfFile.size > 8 * 1024 * 1024) { setError('Choose a PDF smaller than 8 MB.'); return; }
+    if (!supabase) { setError('Connect Supabase before generating a quiz.'); return; }
+    setGeneratingPdfQuiz(true); setError('');
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('generate-pdf-quiz', {
+        body: await pdfFile.arrayBuffer(),
+        headers: { 'Content-Type': 'application/pdf', 'x-question-count': String(pdfQuestionCount) },
+        timeout: 120_000,
+      });
+      if (invokeError) {
+        const context = (invokeError as Error & { context?: unknown }).context;
+        let message = invokeError.message;
+        if (context instanceof Response) {
+          try { const body = await context.json() as { error?: string }; message = body.error || message; } catch { /* use the SDK message */ }
+        }
+        throw new Error(message);
+      }
+      const questions = (data as { questions?: { question: string; answer: string }[] })?.questions;
+      if (!Array.isArray(questions) || questions.length === 0) throw new Error('No questions were generated. Try a different PDF.');
+      setMasks(questions.map(item => ({ id: crypto.randomUUID(), x: 0, y: 0, w: 0, h: 0, question: item.question, answer: item.answer })));
+      setQuizType('text'); setPdfFile(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not generate questions from that PDF.');
+    } finally { setGeneratingPdfQuiz(false); }
+  };
   const confirmBlankText = () => {
     if (!blankTextDraft.trim()) { setError('Paste a passage first.'); return; }
     setConfirmedBlankText(blankTextDraft); setMasks([]); setSelectedTextRange(null); setBlankTextConfirmed(true); setError('');
@@ -304,7 +361,7 @@ function App() {
       if (!supabase) throw new Error('Set your Supabase URL and anon key first.');
       const result = await supabase.from('study_sets').insert(setToRow(item)); if (result.error) throw result.error;
       const nextSets = [item, ...sets];
-      setSets(nextSets); setImage(''); setMasks([]); setSelectedMask(null); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setView('folder');
+      setSets(nextSets); setImage(''); setMasks([]); setSelectedMask(null); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setPdfFile(null); setView('folder');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save this quiz.'); }
     finally { setSaving(false); }
   };
@@ -318,29 +375,32 @@ function App() {
   const loadPracticeTask = (task: PracticeTask) => {
     setActive(task.set); setCardIndex(task.questionIndex ?? 0); setPictureAnswers({}); setPictureSubmitted(false); setQuizScore(0); setQuizComplete(false);
     setFlashcardRevealed(false);
+    if (task.set.kind === 'flashcard') setFlashcardCheer(previous => randomFlashcardCheer(previous));
     setTextChoices(task.set.image ? {} : choicesFor(task.set)); setSelectedChoice(null); setChoiceChecked(false);
     setSingleQuestion(task.questionIndex !== null); setView('study');
   };
   const startStudy = (item: StudySet, questionIndex: number | null = null) => {
+    setFolderPracticeComplete(false);
     setMixedPractice(false); setPracticeTasks([]); setPracticeTaskIndex(0);
     loadPracticeTask({ set: item, questionIndex });
   };
   const startFolderPractice = () => {
     const tasks: PracticeTask[] = folderSets.flatMap((set): PracticeTask[] => set.image || set.kind === 'flashcard' || set.kind === 'fillblank' ? [{ set, questionIndex: null }] : set.masks.map((_, questionIndex) => ({ set, questionIndex })));
     if (!tasks.length) return;
+    setFolderPracticeComplete(false);
     setPracticeTasks(tasks); setPracticeTaskIndex(0); setMixedPractice(true); loadPracticeTask(tasks[0]);
   };
   const nextPracticeTask = () => {
     const nextIndex = practiceTaskIndex + 1;
     if (nextIndex >= practiceTasks.length) {
-      setMixedPractice(false); setPracticeTasks([]); setView('folder'); return;
+      setMixedPractice(false); setFolderPracticeComplete(true); setView('study'); return;
     }
     setPracticeTaskIndex(nextIndex); loadPracticeTask(practiceTasks[nextIndex]);
   };
   const nextMask = () => {
     if (active?.kind === 'flashcard') {
       if (cardIndex >= active.masks.length - 1) setQuizComplete(true);
-      else { setCardIndex(index => index + 1); setFlashcardRevealed(false); }
+      else { setCardIndex(index => index + 1); setFlashcardRevealed(false); setFlashcardCheer(previous => randomFlashcardCheer(previous)); }
       return;
     }
     if (singleQuestion) {
@@ -356,7 +416,7 @@ function App() {
   };
   const previousFlashcard = () => {
     if (cardIndex === 0) return;
-    setCardIndex(index => index - 1); setFlashcardRevealed(false); setQuizComplete(false);
+    setCardIndex(index => index - 1); setFlashcardRevealed(false); setQuizComplete(false); setFlashcardCheer(previous => randomFlashcardCheer(previous));
   };
   const checkTextAnswer = () => {
     if (!activeMask || !selectedChoice?.trim()) return;
@@ -436,7 +496,7 @@ function App() {
     </section>}
 
     {view === 'create' && <section className="editor-page"><div className="editor-heading"><div><span className="hello-tag">NEW</span><h1>{createKind === 'flashcard' ? 'Make flashcards' : 'Make a quiz'}</h1></div><button className="primary-button save-button" onClick={event => void saveSet(event as unknown as FormEvent)} disabled={saving}>{saving ? 'Adding…' : <><Plus size={16}/> Add</>}</button></div>{createKind === 'quiz' && <div className="type-switch"><button className={quizType === 'picture' ? 'type-option active' : 'type-option'} onClick={() => changeQuizType('picture')}><ImagePlus size={15}/>Picture</button><button className={quizType === 'text' ? 'type-option active' : 'type-option'} onClick={() => changeQuizType('text')}><Layers3 size={15}/>Text</button><button className={quizType === 'fillblank' ? 'type-option active' : 'type-option'} onClick={() => changeQuizType('fillblank')}><ListChecks size={15}/>Fill in the blank</button></div>}
-      {createKind === 'quiz' && quizType === 'fillblank' ? <div className="fillblank-builder">{!blankTextConfirmed ? <div className="fillblank-paste"><label htmlFor="fillblank-text">Passage</label><textarea id="fillblank-text" value={blankTextDraft} onChange={event => setBlankTextDraft(event.target.value)} placeholder="Paste a passage here" rows={10}/><button className="primary-button" onClick={confirmBlankText}>Confirm text <ArrowRight size={16}/></button></div> : <><div className="fillblank-tools"><p>Highlight one or more words, then add them as a blank.</p><div><button className="soft-button" onClick={() => { setBlankTextDraft(confirmedBlankText); setBlankTextConfirmed(false); setSelectedTextRange(null); }}>Edit text</button><button className="primary-button" disabled={!selectedTextRange} onClick={addFillBlank}><Plus size={15}/> Add blank</button></div></div><div ref={blankPassageRef} className="fillblank-editor-passage" onMouseUp={captureBlankSelection} onTouchEnd={() => window.setTimeout(captureBlankSelection, 0)}>{blankEditorSegments.map((part, index) => part.mark ? <mark className="fillblank-mark-editor" data-number={part.index} key={part.mark.id}>{part.text}</mark> : <span key={`passage-${index}`}>{part.text}</span>)}</div>{masks.length > 0 && <div className="fillblank-mark-list">{masks.map((mark, index) => <div className="answer-row" key={mark.id}><span className="answer-number">{index + 1}</span><span className="fillblank-answer-preview">{mark.answer}</span><button className="icon-action" aria-label={`Remove blank ${index + 1}`} onClick={() => setMasks(previous => previous.filter(item => item.id !== mark.id))}><X size={15}/></button></div>)}</div>}</>}</div> : createKind === 'flashcard' ? <div className="flashcard-builder"><label htmlFor="flashcard-front">Front</label><textarea id="flashcard-front" value={flashcardFrontDraft} onChange={event => setFlashcardFrontDraft(event.target.value)} placeholder="Write a front or paste your notes here" rows={4}/><label htmlFor="flashcard-back">Back</label><textarea id="flashcard-back" value={flashcardBackDraft} onChange={event => setFlashcardBackDraft(event.target.value)} placeholder="Write the answer or sentence here" rows={4}/><p>Fill both fields, or paste bullet forms and a sentence into just one. Bullets stay together on the front.</p>{(flashcardPreview.front || flashcardPreview.back) && <div className="flashcard-preview"><strong>Preview</strong><article><span>Front</span><b>{flashcardPreview.front || 'Add a front'}</b><small>Back: {flashcardPreview.back || 'Add a sentence'}</small></article></div>}</div> : quizType === 'picture' ? (
+      {createKind === 'quiz' && quizType === 'fillblank' ? <div className="fillblank-builder">{!blankTextConfirmed ? <div className="fillblank-paste"><label htmlFor="fillblank-text">Passage</label><textarea id="fillblank-text" value={blankTextDraft} onChange={event => setBlankTextDraft(event.target.value)} placeholder="Paste a passage here" rows={10}/><button className="primary-button" onClick={confirmBlankText}>Start blanking <ArrowRight size={16}/></button></div> : <><div className="fillblank-tools"><p>Highlight one or more words, then add them as a blank.</p><div><button className="soft-button" onClick={() => { setBlankTextDraft(confirmedBlankText); setBlankTextConfirmed(false); setSelectedTextRange(null); }}>Edit text</button><button className="primary-button" disabled={!selectedTextRange} onClick={addFillBlank}><Plus size={15}/> Add blank</button></div></div><div ref={blankPassageRef} className="fillblank-editor-passage" onMouseUp={captureBlankSelection} onTouchEnd={() => window.setTimeout(captureBlankSelection, 0)}>{blankEditorSegments.map((part, index) => part.mark ? <mark className="fillblank-mark-editor" data-number={part.index} key={part.mark.id}>{part.text}</mark> : <span key={`passage-${index}`}>{part.text}</span>)}</div>{masks.length > 0 && <div className="fillblank-mark-list">{masks.map((mark, index) => <div className="answer-row" key={mark.id}><span className="answer-number">{index + 1}</span><span className="fillblank-answer-preview">{mark.answer}</span><button className="icon-action" aria-label={`Remove blank ${index + 1}`} onClick={() => setMasks(previous => previous.filter(item => item.id !== mark.id))}><X size={15}/></button></div>)}</div>}</>}</div> : createKind === 'flashcard' ? <div className="flashcard-builder"><label htmlFor="flashcard-front">Front</label><textarea id="flashcard-front" value={flashcardFrontDraft} onChange={event => setFlashcardFrontDraft(event.target.value)} placeholder="Write a front or paste your notes here" rows={4}/><label htmlFor="flashcard-back">Back</label><textarea id="flashcard-back" value={flashcardBackDraft} onChange={event => setFlashcardBackDraft(event.target.value)} placeholder="Write the answer or sentence here" rows={4}/><p>Fill both fields, or paste bullet forms and a sentence into just one. Bullets stay together on the front.</p>{(flashcardPreview.front || flashcardPreview.back) && <div className="flashcard-preview"><strong>Preview</strong><article><span>Front</span><b>{flashcardPreview.front || 'Add a front'}</b><small>Back: {flashcardPreview.back || 'Add a sentence'}</small></article></div>}</div> : quizType === 'picture' ? (
         <div className="picture-builder">
           <div className="editor-tools">{image && <span>Drag to cover parts</span>}</div>
           {image ? (
@@ -474,6 +534,12 @@ function App() {
         </div>
       ) : (
         <div className="text-builder">
+          <div className="pdf-import-panel">
+            <div><strong>Make questions from a PDF</strong><span>Choose a study guide and AI will draft questions with answers.</span></div>
+            <input ref={pdfRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={event => { const file = event.target.files?.[0] ?? null; setPdfFile(file); setError(file && file.size > 8 * 1024 * 1024 ? 'Choose a PDF smaller than 8 MB.' : ''); event.currentTarget.value = ''; }} />
+            <div className="pdf-import-controls"><button className="soft-button" onClick={() => pdfRef.current?.click()} disabled={generatingPdfQuiz}><Upload size={15}/>{pdfFile ? pdfFile.name : 'Choose PDF'}</button><label>Questions<select value={pdfQuestionCount} onChange={event => setPdfQuestionCount(Number(event.target.value))} disabled={generatingPdfQuiz}>{[5, 10, 15, 20].map(count => <option key={count} value={count}>{count}</option>)}</select></label><button className="primary-button" onClick={() => void generatePdfQuiz()} disabled={!pdfFile || pdfFile.size > 8 * 1024 * 1024 || generatingPdfQuiz}>{generatingPdfQuiz ? 'Making questions…' : 'Generate'}</button></div>
+            <small>Your PDF is sent to Gemini, including scanned pages. The free tier may use submitted content to improve Google products. Kizmo saves only the quiz, not the PDF.</small>
+          </div>
           <div className="text-entry">
             <input value={questionDraft} onChange={event => setQuestionDraft(event.target.value)} placeholder="Question" aria-label="Question" />
             <input value={answerDraft} onChange={event => setAnswerDraft(event.target.value)} placeholder="Answer" aria-label="Answer" />
@@ -483,7 +549,7 @@ function App() {
             <div className="answers-heading"><strong>Questions</strong><span>{masks.length}</span></div>
             {masks.map((item, index) => <div className="text-question-row" key={item.id}>
               <span className="answer-number">{index + 1}</span>
-              <div><strong>{item.question}</strong><small>{item.answer}</small></div>
+              <div><input value={item.question ?? ''} aria-label={`Question ${index + 1}`} onChange={event => setMasks(previous => previous.map(card => card.id === item.id ? { ...card, question: event.target.value } : card))} placeholder="Question"/><input value={item.answer} aria-label={`Answer ${index + 1}`} onChange={event => setMasks(previous => previous.map(card => card.id === item.id ? { ...card, answer: event.target.value } : card))} placeholder="Answer"/></div>
               <button className="icon-action" aria-label={`Remove question ${index + 1}`} onClick={() => setMasks(previous => previous.filter(card => card.id !== item.id))}><X size={15} /></button>
             </div>)}
           </div>}
@@ -492,12 +558,13 @@ function App() {
       <div className="editor-bottom"><button className="soft-button" onClick={() => setView('folder')}>Cancel</button><button className="primary-button" onClick={event => void saveSet(event as unknown as FormEvent)} disabled={saving}>{saving ? 'Adding…' : <>Add {createKind === 'flashcard' ? 'flashcards' : 'quiz'} <ArrowRight size={16}/></>}</button></div></section>}
 
     {view === 'study' && active && <section className="practice-page">
+      {shouldCelebrate && <ConfettiCelebration key={folderPracticeComplete ? 'folder-complete' : 'quiz-complete'}/>}
       <div className="practice-top">
         <button className="round-button" aria-label="Back to folder" onClick={() => setView('folder')}><ArrowLeft size={18}/></button>
         <div><span>{mixedPractice ? `${practiceTaskIndex + 1} of ${practiceTasks.length} in this folder` : active.kind === 'fillblank' ? `${active.masks.length} blanks` : active.image ? `${active.masks.length} answers` : `${cardIndex + 1} of ${active.masks.length}`}</span></div>
         <span className="practice-flower">?</span>
       </div>
-      {active.kind === 'flashcard' ? quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Deck complete!</h2><p>{active.masks.length} cards reviewed</p><button className="primary-button" onClick={() => mixedPractice ? nextPracticeTask() : setView('folder')}>{mixedPractice ? 'Continue' : 'Back to folder'} <ArrowRight size={16}/></button></div> : <div className="flashcard-study"><div className="flashcard-face"><span>{flashcardRevealed ? 'Back' : 'Front'}</span><p>{flashcardRevealed ? activeMask?.answer : activeMask?.question}</p></div><div className="flashcard-controls"><button className="soft-button" disabled={cardIndex === 0} onClick={previousFlashcard}>Previous</button><span>{cardIndex + 1} / {active.masks.length}</span>{!flashcardRevealed ? <button className="primary-button" onClick={() => setFlashcardRevealed(true)}>Show answer <ArrowRight size={16}/></button> : <button className="primary-button" onClick={nextMask}>{cardIndex === active.masks.length - 1 ? 'Finish deck' : 'Next card'} <ArrowRight size={16}/></button>}</div></div> : active.kind === 'fillblank' ? <div className="fillblank-practice"><div className="fillblank-passage">{blankPracticeSegments.map((part, index) => part.mark ? <mark className={`fillblank-practice-mark ${pictureSubmitted ? (pictureAnswers[part.mark.id]?.trim().toLocaleLowerCase() === part.mark.answer.trim().toLocaleLowerCase() ? 'blank-correct' : 'blank-incorrect') : ''}`} key={part.mark.id}>{pictureSubmitted ? part.text : part.index}</mark> : <span key={`fill-text-${index}`}>{part.text}</span>)}</div><div className="fillblank-answer-list">{activeBlankMarks.map((mark, index) => {
+      {folderPracticeComplete ? <div className="practice-finish-screen"><div className="finish-sticker">✿</div><span>FOLDER COMPLETE</span><h1>You did it!</h1><p>You made it through all {practiceTasks.length} study rounds.</p><button className="primary-button" onClick={() => { setFolderPracticeComplete(false); setPracticeTasks([]); setPracticeTaskIndex(0); setView('folder'); }}>Back to folder <ArrowRight size={16}/></button></div> : active.kind === 'flashcard' ? quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Deck complete!</h2><p>{active.masks.length} cards reviewed</p><button className="primary-button" onClick={() => mixedPractice ? nextPracticeTask() : setView('folder')}>{mixedPractice ? 'Continue' : 'Back to folder'} <ArrowRight size={16}/></button></div> : <div className="flashcard-study"><div className="flashcard-flip-scene"><div className={`flashcard-flipper ${flashcardRevealed ? 'is-flipped' : ''}`}><article className="flashcard-face flashcard-front" aria-hidden={flashcardRevealed}><span>Front</span><p>{activeMask?.question}</p><small>Think of the answer, then flip ✿</small></article><article className="flashcard-face flashcard-back" aria-hidden={!flashcardRevealed}><span>Back</span><p>{activeMask?.answer}</p><Flower2 className="flashcard-corner-flower" size={34} aria-hidden="true"/><small key={activeMask?.id} className="flashcard-cheer" aria-live="polite">{flashcardCheer}</small></article></div></div><div className="flashcard-controls"><button className="soft-button" disabled={cardIndex === 0} onClick={previousFlashcard}>Previous</button><span>{cardIndex + 1} / {active.masks.length}</span>{!flashcardRevealed ? <button className="primary-button" onClick={() => setFlashcardRevealed(true)}>Show answer <ArrowRight size={16}/></button> : <button className="primary-button" onClick={nextMask}>{cardIndex === active.masks.length - 1 ? 'Finish deck' : 'Next card'} <ArrowRight size={16}/></button>}</div></div> : active.kind === 'fillblank' ? <div className="fillblank-practice"><div className="fillblank-passage">{blankPracticeSegments.map((part, index) => part.mark ? <mark className={`fillblank-practice-mark ${pictureSubmitted ? (pictureAnswers[part.mark.id]?.trim().toLocaleLowerCase() === part.mark.answer.trim().toLocaleLowerCase() ? 'blank-correct' : 'blank-incorrect') : ''}`} key={part.mark.id}>{pictureSubmitted ? part.text : part.index}</mark> : <span key={`fill-text-${index}`}>{part.text}</span>)}</div><div className="fillblank-answer-list">{activeBlankMarks.map((mark, index) => {
         const correct = pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase();
         return <label className={`fillblank-answer-row ${pictureSubmitted ? (correct ? 'answer-correct' : 'answer-incorrect') : ''}`} key={mark.id}><span>{index + 1}</span><input value={pictureAnswers[mark.id] ?? ''} disabled={pictureSubmitted} onChange={event => setPictureAnswers(previous => ({ ...previous, [mark.id]: event.target.value }))} placeholder="Your answer" aria-label={`Answer blank ${index + 1}`}/>{pictureSubmitted && <small>{correct ? 'Correct' : `Answer: ${mark.answer}`}</small>}</label>;
       })}</div><div className="image-submit-row">{pictureSubmitted && <span>{activeBlankMarks.filter(mark => pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase()).length} / {activeBlankMarks.length} correct</span>}<button className="primary-button" disabled={!pictureSubmitted && activeBlankMarks.some(mark => !pictureAnswers[mark.id]?.trim())} onClick={pictureSubmitted ? mixedPractice ? nextPracticeTask : retryPicture : submitPictureAnswers}>{pictureSubmitted ? mixedPractice ? 'Next' : 'Try again' : 'Check answers'} <ArrowRight size={16}/></button></div></div> : active.image ? <>

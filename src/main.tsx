@@ -5,6 +5,7 @@ import './styles.css';
 import './quiz.css';
 import './interactions.css';
 import './folders.css';
+import './celebration.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,
