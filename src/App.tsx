@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Pencil, Plus, RotateCcw, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Pencil, Plus, RotateCcw, Sparkles, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import { readSnapshot } from './storage';
 import { supabase, supabaseConfigured } from './lib/supabase';
+import { isSoundMuted, playBuzzer, playDing, playFanfare, setSoundMuted } from './sfx';
 
 type Mask = { id: string; x: number; y: number; w: number; h: number; answer: string; question?: string; start?: number; end?: number };
 type StudySet = { id: string; title: string; image: string; masks: Mask[]; createdAt: string; folderId: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string };
@@ -107,6 +108,7 @@ function App() {
   const [practiceTaskIndex, setPracticeTaskIndex] = useState(0);
   const [mixedPractice, setMixedPractice] = useState(false);
   const [folderPracticeComplete, setFolderPracticeComplete] = useState(false);
+  const [folderScore, setFolderScore] = useState({ correct: 0, total: 0 });
   const [singleQuestion, setSingleQuestion] = useState(false);
   const [image, setImage] = useState('');
   const [imageRatio, setImageRatio] = useState(4 / 3);
@@ -138,10 +140,13 @@ function App() {
   const [pdfQuestionMode, setPdfQuestionMode] = useState<'auto' | 'count'>('count');
   const [pdfQuestionCount, setPdfQuestionCount] = useState('10');
   const [generatingPdfQuiz, setGeneratingPdfQuiz] = useState(false);
+  const [soundMuted, setSoundMutedState] = useState(isSoundMuted);
+  const [revealedCount, setRevealedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const backupRef = useRef<HTMLInputElement>(null);
+  const revealRunRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const pdfRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -156,10 +161,7 @@ function App() {
   const blankEditorSegments = passageSegments(confirmedBlankText, masks);
   const activeBlankMarks = active?.masks.filter(mark => mark.start !== undefined && mark.end !== undefined).sort((a, b) => a.start! - b.start!) ?? [];
   const blankPracticeSegments = passageSegments(active?.content ?? '', active?.masks ?? []);
-  const lastPracticeTask = !mixedPractice || practiceTaskIndex === practiceTasks.length - 1;
-  const shouldCelebrate = folderPracticeComplete || (active?.kind === 'flashcard'
-    ? quizComplete && lastPracticeTask
-    : lastPracticeTask && (quizComplete || pictureSubmitted || (singleQuestion && choiceChecked)));
+  const shouldCelebrate = folderPracticeComplete;
 
   const loadSets = async () => {
     try {
@@ -290,13 +292,13 @@ function App() {
     if (pdfFile.size > 8 * 1024 * 1024) { setError('Choose a PDF smaller than 8 MB.'); return; }
     if (!supabase) { setError('Connect Supabase before generating a quiz.'); return; }
     const parsedCount = Number(pdfQuestionCount);
-    if (pdfQuestionMode === 'count' && (!Number.isInteger(parsedCount) || parsedCount < 1 || parsedCount > 100)) { setError('Enter a number of questions between 1 and 100.'); return; }
+    if (pdfQuestionMode === 'count' && (!Number.isInteger(parsedCount) || parsedCount < 1 || parsedCount > 300)) { setError('Enter a number of questions between 1 and 300.'); return; }
     setGeneratingPdfQuiz(true); setError('');
     try {
       const { data, error: invokeError } = await supabase.functions.invoke('generate-pdf-quiz', {
         body: await pdfFile.arrayBuffer(),
         headers: { 'Content-Type': 'application/pdf', 'x-question-count': pdfQuestionMode === 'auto' ? 'auto' : String(parsedCount) },
-        timeout: 120_000,
+        timeout: 180_000,
       });
       if (invokeError) {
         const context = (invokeError as Error & { context?: unknown }).context;
@@ -376,6 +378,7 @@ function App() {
     } catch { setError('Could not delete this quiz.'); }
   };
   const loadPracticeTask = (task: PracticeTask) => {
+    revealRunRef.current += 1; setRevealedCount(0);
     setActive(task.set); setCardIndex(task.questionIndex ?? 0); setPictureAnswers({}); setPictureSubmitted(false); setQuizScore(0); setQuizComplete(false);
     setFlashcardRevealed(false);
     if (task.set.kind === 'flashcard') setFlashcardCheer(previous => randomFlashcardCheer(previous));
@@ -390,13 +393,19 @@ function App() {
   const startFolderPractice = () => {
     const tasks: PracticeTask[] = folderSets.flatMap((set): PracticeTask[] => set.image || set.kind === 'flashcard' || set.kind === 'fillblank' ? [{ set, questionIndex: null }] : set.masks.map((_, questionIndex) => ({ set, questionIndex })));
     if (!tasks.length) return;
-    setFolderPracticeComplete(false);
+    setFolderPracticeComplete(false); setFolderScore({ correct: 0, total: 0 });
     setPracticeTasks(tasks); setPracticeTaskIndex(0); setMixedPractice(true); loadPracticeTask(tasks[0]);
   };
   const nextPracticeTask = () => {
+    if (active && active.kind !== 'flashcard') {
+      const score = active.image || active.kind === 'fillblank'
+        ? active.masks.filter(mask => pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase()).length
+        : quizScore;
+      setFolderScore(previous => ({ correct: previous.correct + score, total: previous.total + (singleQuestion ? 1 : active.masks.length) }));
+    }
     const nextIndex = practiceTaskIndex + 1;
     if (nextIndex >= practiceTasks.length) {
-      setMixedPractice(false); setFolderPracticeComplete(true); setView('study'); return;
+      revealRunRef.current += 1; setMixedPractice(false); setFolderPracticeComplete(true); setView('study'); void playFanfare(); return;
     }
     setPracticeTaskIndex(nextIndex); loadPracticeTask(practiceTasks[nextIndex]);
   };
@@ -423,7 +432,8 @@ function App() {
   };
   const checkTextAnswer = () => {
     if (!activeMask || !selectedChoice?.trim()) return;
-    if (selectedChoice?.trim().toLocaleLowerCase() === activeMask.answer.trim().toLocaleLowerCase()) setQuizScore(score => score + 1);
+    const correct = selectedChoice.trim().toLocaleLowerCase() === activeMask.answer.trim().toLocaleLowerCase();
+    if (correct) { setQuizScore(score => score + 1); playDing(); } else playBuzzer();
     setChoiceChecked(true);
   };
 
@@ -451,7 +461,19 @@ function App() {
   };
   const submitPictureAnswers = () => {
     if (!active?.masks.length || active.masks.some(mask => !pictureAnswers[mask.id]?.trim())) return;
+    const ordered = active.kind === 'fillblank' ? activeBlankMarks : active.masks;
+    const results = ordered.map(mask => pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase());
     setPictureSubmitted(true);
+    const run = ++revealRunRef.current;
+    if (isSoundMuted()) { setRevealedCount(results.length); return; }
+    setRevealedCount(0);
+    void (async () => {
+      for (let index = 0; index < results.length; index += 1) {
+        if (run !== revealRunRef.current) return;
+        setRevealedCount(index + 1);
+        await (results[index] ? playDing() : playBuzzer());
+      }
+    })();
   };
   const setFolderArchived = async (folder: StudyFolder, archived: boolean) => {
     try {
@@ -470,7 +492,7 @@ function App() {
       setFolders(folders.filter(item => item.id !== folder.id)); setSets(sets.filter(item => item.folderId !== folder.id));
     } catch { setError('Could not permanently delete this folder.'); }
   };
-  const retryPicture = () => { setPictureAnswers({}); setPictureSubmitted(false); };
+  const retryPicture = () => { revealRunRef.current += 1; setRevealedCount(0); setPictureAnswers({}); setPictureSubmitted(false); };
 
   return <main className="app-shell">
     <header className="topbar"><button className="brand" onClick={() => { setFolderId(null); setView('home'); }}><span className="brand-mark"><Layers3 size={19}/></span><span>kizmo<span className="brand-dot">.</span></span></button>{view === 'create' ? <button className="round-button" aria-label="Close editor" onClick={() => setView('folder')}><X size={19}/></button> : <span className="top-flower">✿</span>}</header>
@@ -540,7 +562,7 @@ function App() {
           <div className="pdf-import-panel">
             <div><strong>Make questions from a PDF</strong><span>Choose a study guide and AI will draft questions with answers.</span></div>
             <input ref={pdfRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={event => { const file = event.target.files?.[0] ?? null; setPdfFile(file); setError(file && file.size > 8 * 1024 * 1024 ? 'Choose a PDF smaller than 8 MB.' : ''); event.currentTarget.value = ''; }} />
-            <div className="pdf-import-controls"><button className="soft-button" onClick={() => pdfRef.current?.click()} disabled={generatingPdfQuiz}><Upload size={15}/>{pdfFile ? pdfFile.name : 'Choose PDF'}</button><label>Questions<select value={pdfQuestionMode} onChange={event => setPdfQuestionMode(event.target.value as 'auto' | 'count')} disabled={generatingPdfQuiz}><option value="auto">AI decides</option><option value="count">Number</option></select></label>{pdfQuestionMode === 'count' && <input className="pdf-count-input" type="number" min={1} max={100} step={1} value={pdfQuestionCount} onChange={event => setPdfQuestionCount(event.target.value)} disabled={generatingPdfQuiz} aria-label="Number of questions" />}<button className="primary-button" onClick={() => void generatePdfQuiz()} disabled={!pdfFile || pdfFile.size > 8 * 1024 * 1024 || generatingPdfQuiz}>{generatingPdfQuiz ? 'Making questions…' : 'Generate'}</button></div>
+            <div className="pdf-import-controls"><button className="soft-button" onClick={() => pdfRef.current?.click()} disabled={generatingPdfQuiz}><Upload size={15}/>{pdfFile ? pdfFile.name : 'Choose PDF'}</button><label>Questions<select value={pdfQuestionMode} onChange={event => setPdfQuestionMode(event.target.value as 'auto' | 'count')} disabled={generatingPdfQuiz}><option value="auto">AI decides</option><option value="count">Number</option></select></label>{pdfQuestionMode === 'count' && <input className="pdf-count-input" type="number" min={1} max={300} step={1} value={pdfQuestionCount} onChange={event => setPdfQuestionCount(event.target.value)} disabled={generatingPdfQuiz} aria-label="Number of questions" />}<button className="primary-button" onClick={() => void generatePdfQuiz()} disabled={!pdfFile || pdfFile.size > 8 * 1024 * 1024 || generatingPdfQuiz}>{generatingPdfQuiz ? 'Making questions…' : 'Generate'}</button></div>
             <small>Your PDF is sent to Gemini, including scanned pages. The free tier may use submitted content to improve Google products. Kizmo saves only the quiz, not the PDF.</small>
           </div>
           <div className="text-entry">
@@ -561,38 +583,39 @@ function App() {
       <div className="editor-bottom"><button className="soft-button" onClick={() => setView('folder')}>Cancel</button><button className="primary-button" onClick={event => void saveSet(event as unknown as FormEvent)} disabled={saving}>{saving ? 'Adding…' : <>Add {createKind === 'flashcard' ? 'flashcards' : 'quiz'} <ArrowRight size={16}/></>}</button></div></section>}
 
     {view === 'study' && active && <section className="practice-page">
-      {shouldCelebrate && <ConfettiCelebration key={folderPracticeComplete ? 'folder-complete' : 'quiz-complete'}/>}
+      {shouldCelebrate && <ConfettiCelebration key="folder-complete"/>}
       <div className="practice-top">
         <button className="round-button" aria-label="Back to folder" onClick={() => setView('folder')}><ArrowLeft size={18}/></button>
         <div><span>{mixedPractice ? `${practiceTaskIndex + 1} of ${practiceTasks.length} in this folder` : active.kind === 'fillblank' ? `${active.masks.length} blanks` : active.image ? `${active.masks.length} answers` : `${cardIndex + 1} of ${active.masks.length}`}</span></div>
+        <button className="round-button" aria-label={soundMuted ? 'Unmute sounds' : 'Mute sounds'} onClick={() => { const next = !soundMuted; setSoundMutedState(next); setSoundMuted(next); }}>{soundMuted ? <VolumeX size={17}/> : <Volume2 size={17}/>}</button>
         <span className="practice-flower">?</span>
       </div>
-      {folderPracticeComplete ? <div className="practice-finish-screen"><div className="finish-sticker">✿</div><span>FOLDER COMPLETE</span><h1>You did it!</h1><p>You made it through all {practiceTasks.length} study rounds.</p><button className="primary-button" onClick={() => { setFolderPracticeComplete(false); setPracticeTasks([]); setPracticeTaskIndex(0); setView('folder'); }}>Back to folder <ArrowRight size={16}/></button></div> : active.kind === 'flashcard' ? quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Deck complete!</h2><p>{active.masks.length} cards reviewed</p><button className="primary-button" onClick={() => mixedPractice ? nextPracticeTask() : setView('folder')}>{mixedPractice ? 'Continue' : 'Back to folder'} <ArrowRight size={16}/></button></div> : <div className="flashcard-study"><div className="flashcard-flip-scene"><div className={`flashcard-flipper ${flashcardRevealed ? 'is-flipped' : ''}`}><article className="flashcard-face flashcard-front" aria-hidden={flashcardRevealed}><span>Front</span><p>{activeMask?.question}</p><small>Think of the answer, then flip ✿</small></article><article className="flashcard-face flashcard-back" aria-hidden={!flashcardRevealed}><span>Back</span><p>{activeMask?.answer}</p><Flower2 className="flashcard-corner-flower" size={34} aria-hidden="true"/><small key={activeMask?.id} className="flashcard-cheer" aria-live="polite">{flashcardCheer}</small></article></div></div><div className="flashcard-controls"><button className="soft-button" disabled={cardIndex === 0} onClick={previousFlashcard}>Previous</button><span>{cardIndex + 1} / {active.masks.length}</span>{!flashcardRevealed ? <button className="primary-button" onClick={() => setFlashcardRevealed(true)}>Show answer <ArrowRight size={16}/></button> : <button className="primary-button" onClick={nextMask}>{cardIndex === active.masks.length - 1 ? 'Finish deck' : 'Next card'} <ArrowRight size={16}/></button>}</div></div> : active.kind === 'fillblank' ? <div className="fillblank-practice"><div className="fillblank-passage">{blankPracticeSegments.map((part, index) => part.mark ? <mark className={`fillblank-practice-mark ${pictureSubmitted ? (pictureAnswers[part.mark.id]?.trim().toLocaleLowerCase() === part.mark.answer.trim().toLocaleLowerCase() ? 'blank-correct' : 'blank-incorrect') : ''}`} key={part.mark.id}>{pictureSubmitted ? part.text : part.index}</mark> : <span key={`fill-text-${index}`}>{part.text}</span>)}</div><div className="fillblank-answer-list">{activeBlankMarks.map((mark, index) => {
+      {folderPracticeComplete ? <div className="practice-finish-screen"><div className="finish-sticker">✿</div><span>FOLDER COMPLETE</span><h1>You did it!</h1><p>You made it through all {practiceTasks.length} study rounds.</p>{folderScore.total > 0 && <p>You scored <strong>{folderScore.correct} / {folderScore.total}</strong> correct ✿</p>}<button className="primary-button" onClick={() => { setFolderPracticeComplete(false); setPracticeTasks([]); setPracticeTaskIndex(0); setView('folder'); }}>Back to folder <ArrowRight size={16}/></button></div> : active.kind === 'flashcard' ? quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Deck complete!</h2><p>{active.masks.length} cards reviewed</p><button className="primary-button" onClick={() => mixedPractice ? nextPracticeTask() : setView('folder')}>{mixedPractice ? 'Continue' : 'Back to folder'} <ArrowRight size={16}/></button></div> : <div className="flashcard-study"><div className="flashcard-flip-scene"><div className={`flashcard-flipper ${flashcardRevealed ? 'is-flipped' : ''}`}><article className="flashcard-face flashcard-front" aria-hidden={flashcardRevealed}><span>Front</span><p>{activeMask?.question}</p><small>Think of the answer, then flip ✿</small></article><article className="flashcard-face flashcard-back" aria-hidden={!flashcardRevealed}><span>Back</span><p>{activeMask?.answer}</p><Flower2 className="flashcard-corner-flower" size={34} aria-hidden="true"/><small key={activeMask?.id} className="flashcard-cheer" aria-live="polite">{flashcardCheer}</small></article></div></div><div className="flashcard-controls"><button className="soft-button" disabled={cardIndex === 0} onClick={previousFlashcard}>Previous</button><span>{cardIndex + 1} / {active.masks.length}</span>{!flashcardRevealed ? <button className="primary-button" onClick={() => setFlashcardRevealed(true)}>Show answer <ArrowRight size={16}/></button> : <button className="primary-button" onClick={nextMask}>{cardIndex === active.masks.length - 1 ? 'Finish deck' : 'Next card'} <ArrowRight size={16}/></button>}</div></div> : active.kind === 'fillblank' ? <div className="fillblank-practice"><div className="fillblank-passage">{blankPracticeSegments.map((part, index) => part.mark ? (() => { const revealed = activeBlankMarks.findIndex(item => item.id === part.mark!.id) < revealedCount; const markCorrect = pictureAnswers[part.mark!.id]?.trim().toLocaleLowerCase() === part.mark!.answer.trim().toLocaleLowerCase(); return <mark className={`fillblank-practice-mark ${pictureSubmitted && revealed ? (markCorrect ? 'blank-correct' : 'blank-incorrect') : ''}`} key={part.mark!.id}>{revealed ? part.text : part.index}</mark>; })() : <span key={`fill-text-${index}`}>{part.text}</span>)}</div><div className="fillblank-answer-list">{activeBlankMarks.map((mark, index) => {
         const correct = pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase();
-        return <label className={`fillblank-answer-row ${pictureSubmitted ? (correct ? 'answer-correct' : 'answer-incorrect') : ''}`} key={mark.id}><span>{index + 1}</span><input value={pictureAnswers[mark.id] ?? ''} disabled={pictureSubmitted} onChange={event => setPictureAnswers(previous => ({ ...previous, [mark.id]: event.target.value }))} placeholder="Your answer" aria-label={`Answer blank ${index + 1}`}/>{pictureSubmitted && <small>{correct ? 'Correct' : `Answer: ${mark.answer}`}</small>}</label>;
-      })}</div><div className="image-submit-row">{pictureSubmitted && <span>{activeBlankMarks.filter(mark => pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase()).length} / {activeBlankMarks.length} correct</span>}<button className="primary-button" disabled={!pictureSubmitted && activeBlankMarks.some(mark => !pictureAnswers[mark.id]?.trim())} onClick={pictureSubmitted ? mixedPractice ? nextPracticeTask : retryPicture : submitPictureAnswers}>{pictureSubmitted ? mixedPractice ? 'Next' : 'Try again' : 'Check answers'} <ArrowRight size={16}/></button></div></div> : active.image ? <>
+        return <label className={`fillblank-answer-row ${pictureSubmitted && index < revealedCount ? (correct ? 'answer-correct' : 'answer-incorrect') : ''}`} key={mark.id}><span>{index + 1}</span><input value={pictureAnswers[mark.id] ?? ''} disabled={pictureSubmitted} onChange={event => setPictureAnswers(previous => ({ ...previous, [mark.id]: event.target.value }))} placeholder="Your answer" aria-label={`Answer blank ${index + 1}`}/>{pictureSubmitted && index < revealedCount && <small>{correct ? 'Correct' : `Answer: ${mark.answer}`}</small>}</label>;
+      })}</div><div className="image-submit-row">{pictureSubmitted && revealedCount >= activeBlankMarks.length && <span>{activeBlankMarks.filter(mark => pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase()).length} / {activeBlankMarks.length} correct</span>}<button className="primary-button" disabled={!pictureSubmitted && activeBlankMarks.some(mark => !pictureAnswers[mark.id]?.trim())} onClick={pictureSubmitted ? mixedPractice ? nextPracticeTask : retryPicture : submitPictureAnswers}>{pictureSubmitted ? mixedPractice ? 'Next' : 'Try again' : 'Check answers'} <ArrowRight size={16}/></button></div></div> : active.image ? <>
         <div className="practice-image" style={{ aspectRatio: imageRatio }}>
           <img src={active.image} alt="Quiz diagram" onLoad={event => setImageRatio(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight)}/>
           {active.masks.map((mask, index) => {
             const correct = pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase();
-            const resultClass = pictureSubmitted ? (correct ? 'submitted-correct' : 'submitted-incorrect') : '';
+            const resultClass = pictureSubmitted && index < revealedCount ? (correct ? 'submitted-correct' : 'submitted-incorrect') : '';
             return <div key={mask.id} className={`practice-mask ${resultClass}`} style={{ left: `${mask.x}%`, top: `${mask.y}%`, width: `${mask.w}%`, height: `${mask.h}%` }} aria-label={`Covered answer ${answerLabel(index)}`}>
-              {!pictureSubmitted && <span>{answerLabel(index)}</span>}
+              {!(pictureSubmitted && index < revealedCount) && <span>{answerLabel(index)}</span>}
             </div>;
           })}
         </div>
         <div className="image-answer-list">
           {active.masks.map((mask, index) => {
             const correct = pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase();
-            return <label key={mask.id} className={`image-answer-row ${pictureSubmitted ? (correct ? 'answer-correct' : 'answer-incorrect') : ''}`}>
+            return <label key={mask.id} className={`image-answer-row ${pictureSubmitted && index < revealedCount ? (correct ? 'answer-correct' : 'answer-incorrect') : ''}`}>
               <span className="image-answer-letter">{answerLabel(index)}:</span>
               <input value={pictureAnswers[mask.id] ?? ''} disabled={pictureSubmitted} onChange={event => setPictureAnswers(previous => ({ ...previous, [mask.id]: event.target.value }))} placeholder="Your answer" aria-label={`Answer ${answerLabel(index)}`}/>
-              {pictureSubmitted && <small>{correct ? 'Correct' : `Answer: ${mask.answer}`}</small>}
+              {pictureSubmitted && index < revealedCount && <small>{correct ? 'Correct' : `Answer: ${mask.answer}`}</small>}
             </label>;
           })}
         </div>
         <div className="image-submit-row">
-          {pictureSubmitted && <span>{active.masks.filter(mask => pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase()).length} / {active.masks.length} correct</span>}
+          {pictureSubmitted && revealedCount >= active.masks.length && <span>{active.masks.filter(mask => pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase()).length} / {active.masks.length} correct</span>}
           <button className="primary-button" disabled={!pictureSubmitted && active.masks.some(mask => !pictureAnswers[mask.id]?.trim())} onClick={pictureSubmitted ? mixedPractice ? nextPracticeTask : retryPicture : submitPictureAnswers}>{pictureSubmitted ? mixedPractice ? 'Next' : 'Try again' : 'Check answers'} <ArrowRight size={16}/></button>
         </div>
       </> : quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Quiz complete!</h2><p>{quizScore} / {active.masks.length} correct</p><button className="primary-button" onClick={() => setView('folder')}>Back to folder <ArrowRight size={16}/></button></div> : <>
