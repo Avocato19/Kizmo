@@ -135,7 +135,8 @@ function App() {
   const [questionDraft, setQuestionDraft] = useState('');
   const [answerDraft, setAnswerDraft] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfQuestionCount, setPdfQuestionCount] = useState(10);
+  const [pdfQuestionMode, setPdfQuestionMode] = useState<'auto' | 'count'>('count');
+  const [pdfQuestionCount, setPdfQuestionCount] = useState('10');
   const [generatingPdfQuiz, setGeneratingPdfQuiz] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -217,7 +218,7 @@ function App() {
   const startCreate = (kind: 'quiz' | 'flashcard' = 'quiz') => {
     if (!folderId) { setError('Open a folder first.'); return; }
     setImage(''); setMasks([]); setSelectedMask(null);
-    setQuestionDraft(''); setAnswerDraft(''); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setSelectedTextRange(null); setPdfFile(null); setPdfQuestionCount(10); setCreateKind(kind); setQuizType('picture'); setView('create'); setError('');
+    setQuestionDraft(''); setAnswerDraft(''); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setSelectedTextRange(null); setPdfFile(null); setPdfQuestionMode('count'); setPdfQuestionCount('10'); setCreateKind(kind); setQuizType('picture'); setView('create'); setError('');
   };
   const changeQuizType = (type: 'picture' | 'text' | 'fillblank') => {
     setQuizType(type); setImage(''); setMasks([]); setSelectedMask(null); setError('');
@@ -288,11 +289,13 @@ function App() {
     if (!pdfFile) { setError('Choose a PDF first.'); return; }
     if (pdfFile.size > 8 * 1024 * 1024) { setError('Choose a PDF smaller than 8 MB.'); return; }
     if (!supabase) { setError('Connect Supabase before generating a quiz.'); return; }
+    const parsedCount = Number(pdfQuestionCount);
+    if (pdfQuestionMode === 'count' && (!Number.isInteger(parsedCount) || parsedCount < 1 || parsedCount > 100)) { setError('Enter a number of questions between 1 and 100.'); return; }
     setGeneratingPdfQuiz(true); setError('');
     try {
       const { data, error: invokeError } = await supabase.functions.invoke('generate-pdf-quiz', {
         body: await pdfFile.arrayBuffer(),
-        headers: { 'Content-Type': 'application/pdf', 'x-question-count': String(pdfQuestionCount) },
+        headers: { 'Content-Type': 'application/pdf', 'x-question-count': pdfQuestionMode === 'auto' ? 'auto' : String(parsedCount) },
         timeout: 120_000,
       });
       if (invokeError) {
@@ -537,7 +540,7 @@ function App() {
           <div className="pdf-import-panel">
             <div><strong>Make questions from a PDF</strong><span>Choose a study guide and AI will draft questions with answers.</span></div>
             <input ref={pdfRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={event => { const file = event.target.files?.[0] ?? null; setPdfFile(file); setError(file && file.size > 8 * 1024 * 1024 ? 'Choose a PDF smaller than 8 MB.' : ''); event.currentTarget.value = ''; }} />
-            <div className="pdf-import-controls"><button className="soft-button" onClick={() => pdfRef.current?.click()} disabled={generatingPdfQuiz}><Upload size={15}/>{pdfFile ? pdfFile.name : 'Choose PDF'}</button><label>Questions<select value={pdfQuestionCount} onChange={event => setPdfQuestionCount(Number(event.target.value))} disabled={generatingPdfQuiz}>{[5, 10, 15, 20].map(count => <option key={count} value={count}>{count}</option>)}</select></label><button className="primary-button" onClick={() => void generatePdfQuiz()} disabled={!pdfFile || pdfFile.size > 8 * 1024 * 1024 || generatingPdfQuiz}>{generatingPdfQuiz ? 'Making questions…' : 'Generate'}</button></div>
+            <div className="pdf-import-controls"><button className="soft-button" onClick={() => pdfRef.current?.click()} disabled={generatingPdfQuiz}><Upload size={15}/>{pdfFile ? pdfFile.name : 'Choose PDF'}</button><label>Questions<select value={pdfQuestionMode} onChange={event => setPdfQuestionMode(event.target.value as 'auto' | 'count')} disabled={generatingPdfQuiz}><option value="auto">AI decides</option><option value="count">Number</option></select></label>{pdfQuestionMode === 'count' && <input className="pdf-count-input" type="number" min={1} max={100} step={1} value={pdfQuestionCount} onChange={event => setPdfQuestionCount(event.target.value)} disabled={generatingPdfQuiz} aria-label="Number of questions" />}<button className="primary-button" onClick={() => void generatePdfQuiz()} disabled={!pdfFile || pdfFile.size > 8 * 1024 * 1024 || generatingPdfQuiz}>{generatingPdfQuiz ? 'Making questions…' : 'Generate'}</button></div>
             <small>Your PDF is sent to Gemini, including scanned pages. The free tier may use submitted content to improve Google products. Kizmo saves only the quiz, not the PDF.</small>
           </div>
           <div className="text-entry">
