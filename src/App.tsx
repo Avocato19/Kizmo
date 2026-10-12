@@ -4,7 +4,7 @@ import { readSnapshot } from './storage';
 import { supabase, supabaseConfigured } from './lib/supabase';
 import { isSoundMuted, playBuzzer, playDing, playFanfare, setSoundMuted } from './sfx';
 
-type Mask = { id: string; x: number; y: number; w: number; h: number; answer: string; question?: string; start?: number; end?: number };
+type Mask = { id: string; x: number; y: number; w: number; h: number; answer: string; question?: string; start?: number; end?: number; distractors?: string[] };
 type StudySet = { id: string; title: string; image: string; masks: Mask[]; createdAt: string; folderId: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string };
 type StudyFolder = { id: string; title: string; createdAt: string; archived?: boolean };
 type PracticeTask = { set: StudySet; questionIndex: number | null };
@@ -34,6 +34,7 @@ const shuffle = <T,>(items: T[]) => {
 };
 const choicesFor = (item: StudySet) => Object.fromEntries(item.masks.map(mask => {
   const correct = mask.answer.trim();
+  if (mask.distractors?.length === 3) return [mask.id, shuffle([correct, ...mask.distractors])];
   const uniqueAnswers = [...new Map(item.masks.map(card => [card.answer.trim().toLocaleLowerCase(), card.answer.trim()])).values()];
   const distractors = shuffle(uniqueAnswers.filter(value => value.toLocaleLowerCase() !== correct.toLocaleLowerCase())).slice(0, Math.min(3, uniqueAnswers.length - 1));
   return [mask.id, shuffle([correct, ...distractors])];
@@ -308,9 +309,9 @@ function App() {
         }
         throw new Error(message);
       }
-      const questions = (data as { questions?: { question: string; answer: string }[] })?.questions;
+      const questions = (data as { questions?: { question: string; answer: string; choices?: string[] }[] })?.questions;
       if (!Array.isArray(questions) || questions.length === 0) throw new Error('No questions were generated. Try a different PDF.');
-      setMasks(questions.map(item => ({ id: crypto.randomUUID(), x: 0, y: 0, w: 0, h: 0, question: item.question, answer: item.answer })));
+      setMasks(questions.map(item => ({ id: crypto.randomUUID(), x: 0, y: 0, w: 0, h: 0, question: item.question, answer: item.answer, ...(Array.isArray(item.choices) && item.choices.length === 3 ? { distractors: item.choices } : {}) })));
       setQuizType('text'); setPdfFile(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not generate questions from that PDF.');
