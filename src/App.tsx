@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Pencil, Plus, RotateCcw, Sparkles, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Moon, Pencil, Plus, RotateCcw, Sparkles, Sun, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import { readSnapshot } from './storage';
 import { supabase, supabaseConfigured } from './lib/supabase';
 import { isSoundMuted, playBuzzer, playDing, playFanfare, setSoundMuted } from './sfx';
+import { applyTheme, currentTheme, getStoredTheme, systemTheme, type Theme } from './theme';
 
 type Mask = { id: string; x: number; y: number; w: number; h: number; answer: string; question?: string; start?: number; end?: number; distractors?: string[] };
 type StudySet = { id: string; title: string; image: string; masks: Mask[]; createdAt: string; folderId: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string };
@@ -142,6 +143,7 @@ function App() {
   const [pdfQuestionCount, setPdfQuestionCount] = useState('10');
   const [generatingPdfQuiz, setGeneratingPdfQuiz] = useState(false);
   const [soundMuted, setSoundMutedState] = useState(isSoundMuted);
+  const [theme, setTheme] = useState<Theme>(() => currentTheme());
   const [revealedCount, setRevealedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -191,6 +193,12 @@ function App() {
     finally { setLoading(false); }
   };
   useEffect(() => { void loadSets(); }, []);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => { if (getStoredTheme()) return; const next = systemTheme(); setTheme(next); applyTheme(next, false); };
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
   const exportBackup = async () => {
     if (!supabase) { setError('Set your Supabase URL and anon key first.'); return; }
     const [folderResult, setResult] = await Promise.all([
@@ -494,9 +502,10 @@ function App() {
     } catch { setError('Could not permanently delete this folder.'); }
   };
   const retryPicture = () => { revealRunRef.current += 1; setRevealedCount(0); setPictureAnswers({}); setPictureSubmitted(false); };
+  const toggleTheme = () => { const next: Theme = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); };
 
   return <main className="app-shell">
-    <header className="topbar"><button className="brand" onClick={() => { setFolderId(null); setView('home'); }}><span className="brand-mark"><Layers3 size={19}/></span><span>kizmo<span className="brand-dot">.</span></span></button>{view === 'create' ? <button className="round-button" aria-label="Close editor" onClick={() => setView('folder')}><X size={19}/></button> : <span className="top-flower">✿</span>}</header>
+    <header className="topbar"><button className="brand" onClick={() => { setFolderId(null); setView('home'); }}><span className="brand-mark"><Layers3 size={19}/></span><span>kizmo<span className="brand-dot">.</span></span></button><div className="topbar-actions"><button className="round-button theme-toggle" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>{view === 'create' ? <button className="round-button" aria-label="Close editor" onClick={() => setView('folder')}><X size={19}/></button> : <span className="top-flower">✿</span>}</div></header>
     {error && <div className="notice" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss"><X size={15}/></button></div>}
 
     {view === 'home' && <section className="home-page">

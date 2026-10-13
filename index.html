@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#fbf9f3" />
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('kizmo-theme');
+          if (theme !== 'dark' && theme !== 'light') {
+            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', theme === 'dark' ? '#17131a' : '#fff8fb');
+        } catch (error) { /* keep default light theme */ }
+      })();
+    </script>
     <meta name="description" content="Make picture quizzes with your own images and answers." />
     <title>Kizmo — picture quizzes</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -1,0 +1,87 @@
+/* Dark theme — loaded last; overrides the celebration.css light layer and any leftover hardcoded colors. */
+
+:root[data-theme='dark'] {
+  --ink: #f0e8f2;
+  --muted: #a99ea9;
+  --line: #3a3140;
+  --green: #e08fae;
+  --green-dark: #c77896;
+  --green-soft: #242e26;
+  --pink: #3a2631;
+  --lilac: #2a2340;
+  --yellow: #3a3324;
+  --bg: #17131a;
+  --surface: #221c27;
+  --surface-soft: #262030;
+  --soft: #2a2433;
+  --link: #8fc49c;
+  --ok: #5fca87;
+  --ok-ink: #8ee4ac;
+  --ok-bg: #1c2a22;
+  --bad: #e8756f;
+  --bad-ink: #ff9d97;
+  --bad-bg: #2f1d20;
+  --sel: #6aa6e8;
+  --sel-bg: #1d2634;
+  --sel-ink: #93c4f5;
+}
+
+[data-theme='dark'] body {
+  background: radial-gradient(ellipse at 4% 7%, #2a1a26 0, transparent 32%),
+    radial-gradient(ellipse at 97% 19%, #1e1a30 0, transparent 30%), var(--bg);
+  color: var(--ink);
+}
+
+[data-theme='dark'] button:focus-visible,
+[data-theme='dark'] input:focus-visible { outline-color: #4f7a5c; }
+
+[data-theme='dark'] .notice { border-color: #4a3c22; background: #2b2317; color: #ddc7a2; }
+
+[data-theme='dark'] .welcome {
+  border-color: #3a3140;
+  background: linear-gradient(122deg, #241d2e 0%, #221f33 48%, #1d2a22 100%);
+  box-shadow: none;
+}
+[data-theme='dark'] .welcome:after { color: #ffffff14; }
+
+[data-theme='dark'] .soft-button { border-color: var(--line); background: var(--surface); color: var(--muted); }
+[data-theme='dark'] .soft-button:hover:not(:disabled) { background: #2b2433; }
+[data-theme='dark'] .primary-button { color: #fff; }
+[data-theme='dark'] .primary-button:hover:not(:disabled) { background: var(--green-dark); }
+
+[data-theme='dark'] .brand-mark { background: var(--pink); color: #e8a8bc; }
+[data-theme='dark'] .top-flower { color: #e8a0b4; }
+
+[data-theme='dark'] .folder-art { background: linear-gradient(135deg, #2a2340, #3a2631 52%, #1f2b24); color: #c9a3b8; }
+[data-theme='dark'] .folder-art small { background: var(--surface); }
+
+[data-theme='dark'] .flashcard-deck { background: linear-gradient(130deg, #282138, #33222b 52%, #202b23); }
+[data-theme='dark'] .flashcard-face { background: linear-gradient(145deg, #262032, #1f2a24); box-shadow: none; }
+[data-theme='dark'] .flashcard-front {
+  background: radial-gradient(circle at 92% 10%, #ffffff0d 0 34px, transparent 35px),
+    linear-gradient(145deg, #2a2236, #33222a 52%, #1f2b23);
+}
+[data-theme='dark'] .flashcard-back { background: linear-gradient(145deg, #1f2b23, #1d2a2e 55%, #262032); }
+[data-theme='dark'] .flashcard-cheer { color: #dca9bf !important; }
+[data-theme='dark'] .flashcard-corner-flower { color: #c98ba4; }
+
+[data-theme='dark'] .text-prompt,
+[data-theme='dark'] .set-preview.text-preview { background: linear-gradient(140deg, #272033, #1f2b23); }
+[data-theme='dark'] .pdf-import-panel { background: linear-gradient(135deg, #262033, #1f2b24); }
+[data-theme='dark'] .type-switch { background: #241d2b; }
+
+[data-theme='dark'] .practice-finish-screen {
+  border-color: #3f3144;
+  background: linear-gradient(145deg, #2b1f2c, #241f36 50%, #1f2b23);
+  box-shadow: none;
+}
+[data-theme='dark'] .practice-finish-screen .finish-sticker { border-color: #4a3544; background: #ffffff10; }
+
+[data-theme='dark'] .flashcard-flip-scene .flashcard-face p { scrollbar-color: #54485a transparent; }
+
+[data-theme='dark'] .text-choice:hover:not(:disabled) { border-color: var(--link); }
+[data-theme='dark'] .folder-question:hover { border-color: var(--link); }
+[data-theme='dark'] .folder-modal > input:focus { border-color: var(--link); }
+
+[data-theme='dark'] .image-answer-row:focus-within { border-color: var(--sel); }
+[data-theme='dark'] .answer-row:focus-within { border-color: var(--sel); }
