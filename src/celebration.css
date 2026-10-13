@@ -35,4 +35,7 @@ body{background:radial-gradient(ellipse at 4% 7%,#ffe8f1 0,transparent 32%),radi
 .folder-art{background:linear-gradient(135deg,#f4e7fb,#ffe7ec 52%,#e6f6e9);color:#ce91b2}
 .flashcard-deck{background:linear-gradient(130deg,#f4e8fc,#ffeaf0 52%,#e8f6e9)}
 .type-switch{background:#f6eaf2}.type-option.active{color:#a85d80}
+.practice-finish-screen .finish-actions{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
+.practice-finish-screen .missed-list{margin:0 0 18px;padding:0;list-style:none;max-width:320px;width:100%}
+.practice-finish-screen .missed-list li{padding:5px 0;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
 @media(prefers-reduced-motion:reduce){.flashcard-flipper{transition-duration:.42s;transition-timing-function:ease-in-out}.practice-finish-screen .finish-sticker{animation:none}.confetti-piece{animation-duration:1.4s}}

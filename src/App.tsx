@@ -111,6 +111,9 @@ function App() {
   const [mixedPractice, setMixedPractice] = useState(false);
   const [folderPracticeComplete, setFolderPracticeComplete] = useState(false);
   const [folderScore, setFolderScore] = useState({ correct: 0, total: 0 });
+  const [taskResults, setTaskResults] = useState<{ task: PracticeTask; wrongMaskIds: string[] }[]>([]);
+  const [retryMode, setRetryMode] = useState(false);
+  const [roundCount, setRoundCount] = useState(0);
   const [singleQuestion, setSingleQuestion] = useState(false);
   const [image, setImage] = useState('');
   const [imageRatio, setImageRatio] = useState(4 / 3);
@@ -165,6 +168,15 @@ function App() {
   const activeBlankMarks = active?.masks.filter(mark => mark.start !== undefined && mark.end !== undefined).sort((a, b) => a.start! - b.start!) ?? [];
   const blankPracticeSegments = passageSegments(active?.content ?? '', active?.masks ?? []);
   const shouldCelebrate = folderPracticeComplete;
+  const incorrectCount = taskResults.reduce((total, result) => total + result.wrongMaskIds.length, 0);
+  const missedRecap = taskResults.filter(result => result.wrongMaskIds.length > 0).map(result => {
+    const { set } = result.task;
+    if (!set.image && set.kind !== 'fillblank') {
+      const mask = set.masks.find(item => item.id === result.wrongMaskIds[0]);
+      return mask?.question?.trim() || 'Question';
+    }
+    return `${set.title?.trim() || (set.kind === 'fillblank' ? 'Passage' : 'Image quiz')} · ${result.wrongMaskIds.length} wrong`;
+  });
 
   const loadSets = async () => {
     try {
@@ -397,26 +409,58 @@ function App() {
   const startStudy = (item: StudySet, questionIndex: number | null = null) => {
     setFolderPracticeComplete(false);
     setMixedPractice(false); setPracticeTasks([]); setPracticeTaskIndex(0);
+    setTaskResults([]); setRetryMode(false); setRoundCount(0);
     loadPracticeTask({ set: item, questionIndex });
+  };
+  const buildRetryTasks = (results: { task: PracticeTask; wrongMaskIds: string[] }[]): PracticeTask[] => results
+    .filter(result => result.wrongMaskIds.length > 0)
+    .map(result => ({
+      set: result.task.set.image || result.task.set.kind === 'fillblank'
+        ? { ...result.task.set, masks: result.task.set.masks.filter(mask => result.wrongMaskIds.includes(mask.id)) }
+        : result.task.set,
+      questionIndex: result.task.questionIndex,
+    }));
+  const startRetryRound = () => {
+    const retryTasks = buildRetryTasks(taskResults);
+    if (!retryTasks.length) return;
+    setRetryMode(true); setFolderPracticeComplete(false); setTaskResults([]);
+    setPracticeTasks(retryTasks); setPracticeTaskIndex(0); setMixedPractice(true); loadPracticeTask(retryTasks[0]);
   };
   const startFolderPractice = () => {
     const tasks: PracticeTask[] = folderSets.flatMap((set): PracticeTask[] => set.image || set.kind === 'flashcard' || set.kind === 'fillblank' ? [{ set, questionIndex: null }] : set.masks.map((_, questionIndex) => ({ set, questionIndex })));
     if (!tasks.length) return;
     setFolderPracticeComplete(false); setFolderScore({ correct: 0, total: 0 });
+    setTaskResults([]); setRetryMode(false); setRoundCount(tasks.length);
     setPracticeTasks(tasks); setPracticeTaskIndex(0); setMixedPractice(true); loadPracticeTask(tasks[0]);
   };
   const nextPracticeTask = () => {
+    const finishedTask = practiceTasks[practiceTaskIndex];
+    let wrongMaskIds: string[] = [];
     if (active && active.kind !== 'flashcard') {
-      const score = active.image || active.kind === 'fillblank'
+      const isWholeSet = active.image || active.kind === 'fillblank';
+      const score = isWholeSet
         ? active.masks.filter(mask => pictureAnswers[mask.id]?.trim().toLocaleLowerCase() === mask.answer.trim().toLocaleLowerCase()).length
         : quizScore;
-      setFolderScore(previous => ({ correct: previous.correct + score, total: previous.total + (singleQuestion ? 1 : active.masks.length) }));
+      wrongMaskIds = isWholeSet
+        ? active.masks.filter(mask => pictureAnswers[mask.id]?.trim().toLocaleLowerCase() !== mask.answer.trim().toLocaleLowerCase()).map(mask => mask.id)
+        : quizScore === 0 ? [active.masks[cardIndex % (active.masks.length || 1)]?.id].filter((id): id is string => Boolean(id)) : [];
+      if (!retryMode) setFolderScore(previous => ({ correct: previous.correct + score, total: previous.total + (singleQuestion ? 1 : active.masks.length) }));
     }
+    const allResults = finishedTask ? [...taskResults, { task: finishedTask, wrongMaskIds }] : taskResults;
+    setTaskResults(allResults);
     const nextIndex = practiceTaskIndex + 1;
-    if (nextIndex >= practiceTasks.length) {
-      revealRunRef.current += 1; setMixedPractice(false); setFolderPracticeComplete(true); setView('study'); void playFanfare(); return;
+    if (nextIndex < practiceTasks.length) {
+      setPracticeTaskIndex(nextIndex); loadPracticeTask(practiceTasks[nextIndex]); return;
     }
-    setPracticeTaskIndex(nextIndex); loadPracticeTask(practiceTasks[nextIndex]);
+    if (retryMode) {
+      const loopTasks = buildRetryTasks(allResults);
+      if (loopTasks.length) {
+        setTaskResults([]); setPracticeTasks(loopTasks); setPracticeTaskIndex(0); loadPracticeTask(loopTasks[0]); return;
+      }
+      setRetryMode(false);
+      setFolderScore(previous => ({ correct: previous.total, total: previous.total }));
+    }
+    revealRunRef.current += 1; setMixedPractice(false); setFolderPracticeComplete(true); setView('study'); void playFanfare();
   };
   const nextMask = () => {
     if (active?.kind === 'flashcard') {
@@ -596,11 +640,11 @@ function App() {
       {shouldCelebrate && <ConfettiCelebration key="folder-complete"/>}
       <div className="practice-top">
         <button className="round-button" aria-label="Back to folder" onClick={() => setView('folder')}><ArrowLeft size={18}/></button>
-        <div><span>{mixedPractice ? `${practiceTaskIndex + 1} of ${practiceTasks.length} in this folder` : active.kind === 'fillblank' ? `${active.masks.length} blanks` : active.image ? `${active.masks.length} answers` : `${cardIndex + 1} of ${active.masks.length}`}</span></div>
+        <div><span>{mixedPractice ? retryMode ? `${practiceTaskIndex + 1} of ${practiceTasks.length} to fix` : `${practiceTaskIndex + 1} of ${practiceTasks.length} in this folder` : active.kind === 'fillblank' ? `${active.masks.length} blanks` : active.image ? `${active.masks.length} answers` : `${cardIndex + 1} of ${active.masks.length}`}</span></div>
         <button className="round-button" aria-label={soundMuted ? 'Unmute sounds' : 'Mute sounds'} onClick={() => { const next = !soundMuted; setSoundMutedState(next); setSoundMuted(next); }}>{soundMuted ? <VolumeX size={17}/> : <Volume2 size={17}/>}</button>
         <span className="practice-flower">?</span>
       </div>
-      {folderPracticeComplete ? <div className="practice-finish-screen"><div className="finish-sticker">✿</div><span>FOLDER COMPLETE</span><h1>You did it!</h1><p>You made it through all {practiceTasks.length} study rounds.</p>{folderScore.total > 0 && <p>You scored <strong>{folderScore.correct} / {folderScore.total}</strong> correct ✿</p>}<button className="primary-button" onClick={() => { setFolderPracticeComplete(false); setPracticeTasks([]); setPracticeTaskIndex(0); setView('folder'); }}>Back to folder <ArrowRight size={16}/></button></div> : active.kind === 'flashcard' ? quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Deck complete!</h2><p>{active.masks.length} cards reviewed</p><button className="primary-button" onClick={() => mixedPractice ? nextPracticeTask() : setView('folder')}>{mixedPractice ? 'Continue' : 'Back to folder'} <ArrowRight size={16}/></button></div> : <div className="flashcard-study"><div className="flashcard-flip-scene"><div className={`flashcard-flipper ${flashcardRevealed ? 'is-flipped' : ''}`}><article className="flashcard-face flashcard-front" aria-hidden={flashcardRevealed}><span>Front</span><p>{activeMask?.question}</p><small>Think of the answer, then flip ✿</small></article><article className="flashcard-face flashcard-back" aria-hidden={!flashcardRevealed}><span>Back</span><p>{activeMask?.answer}</p><Flower2 className="flashcard-corner-flower" size={34} aria-hidden="true"/><small key={activeMask?.id} className="flashcard-cheer" aria-live="polite">{flashcardCheer}</small></article></div></div><div className="flashcard-controls"><button className="soft-button" disabled={cardIndex === 0} onClick={previousFlashcard}>Previous</button><span>{cardIndex + 1} / {active.masks.length}</span>{!flashcardRevealed ? <button className="primary-button" onClick={() => setFlashcardRevealed(true)}>Show answer <ArrowRight size={16}/></button> : <button className="primary-button" onClick={nextMask}>{cardIndex === active.masks.length - 1 ? 'Finish deck' : 'Next card'} <ArrowRight size={16}/></button>}</div></div> : active.kind === 'fillblank' ? <div className="fillblank-practice"><div className="fillblank-passage">{blankPracticeSegments.map((part, index) => part.mark ? (() => { const revealed = activeBlankMarks.findIndex(item => item.id === part.mark!.id) < revealedCount; const markCorrect = pictureAnswers[part.mark!.id]?.trim().toLocaleLowerCase() === part.mark!.answer.trim().toLocaleLowerCase(); return <mark className={`fillblank-practice-mark ${pictureSubmitted && revealed ? (markCorrect ? 'blank-correct' : 'blank-incorrect') : ''}`} key={part.mark!.id}>{revealed ? part.text : part.index}</mark>; })() : <span key={`fill-text-${index}`}>{part.text}</span>)}</div><div className="fillblank-answer-list">{activeBlankMarks.map((mark, index) => {
+      {folderPracticeComplete ? <div className="practice-finish-screen"><div className="finish-sticker">✿</div><span>FOLDER COMPLETE</span><h1>You did it!</h1><p>You made it through all {roundCount || practiceTasks.length} study {(roundCount || practiceTasks.length) === 1 ? 'round' : 'rounds'}.</p>{folderScore.total > 0 && <p>You scored <strong>{folderScore.correct} / {folderScore.total}</strong> correct ✿</p>}{missedRecap.length > 0 && <ul className="missed-list">{missedRecap.map((item, index) => <li key={index}>{item}</li>)}</ul>}<div className="finish-actions">{incorrectCount > 0 && <button className="soft-button" onClick={startRetryRound}>Reanswer {incorrectCount} incorrect {incorrectCount === 1 ? 'answer' : 'answers'}</button>}<button className="primary-button" onClick={() => { setFolderPracticeComplete(false); setPracticeTasks([]); setPracticeTaskIndex(0); setTaskResults([]); setRetryMode(false); setRoundCount(0); setView('folder'); }}>Back to folder <ArrowRight size={16}/></button></div></div> : active.kind === 'flashcard' ? quizComplete ? <div className="quiz-result"><div className="empty-flower">✓</div><h2>Deck complete!</h2><p>{active.masks.length} cards reviewed</p><button className="primary-button" onClick={() => mixedPractice ? nextPracticeTask() : setView('folder')}>{mixedPractice ? 'Continue' : 'Back to folder'} <ArrowRight size={16}/></button></div> : <div className="flashcard-study"><div className="flashcard-flip-scene"><div className={`flashcard-flipper ${flashcardRevealed ? 'is-flipped' : ''}`}><article className="flashcard-face flashcard-front" aria-hidden={flashcardRevealed}><span>Front</span><p>{activeMask?.question}</p><small>Think of the answer, then flip ✿</small></article><article className="flashcard-face flashcard-back" aria-hidden={!flashcardRevealed}><span>Back</span><p>{activeMask?.answer}</p><Flower2 className="flashcard-corner-flower" size={34} aria-hidden="true"/><small key={activeMask?.id} className="flashcard-cheer" aria-live="polite">{flashcardCheer}</small></article></div></div><div className="flashcard-controls"><button className="soft-button" disabled={cardIndex === 0} onClick={previousFlashcard}>Previous</button><span>{cardIndex + 1} / {active.masks.length}</span>{!flashcardRevealed ? <button className="primary-button" onClick={() => setFlashcardRevealed(true)}>Show answer <ArrowRight size={16}/></button> : <button className="primary-button" onClick={nextMask}>{cardIndex === active.masks.length - 1 ? 'Finish deck' : 'Next card'} <ArrowRight size={16}/></button>}</div></div> : active.kind === 'fillblank' ? <div className="fillblank-practice"><div className="fillblank-passage">{blankPracticeSegments.map((part, index) => part.mark ? (() => { const revealed = activeBlankMarks.findIndex(item => item.id === part.mark!.id) < revealedCount; const markCorrect = pictureAnswers[part.mark!.id]?.trim().toLocaleLowerCase() === part.mark!.answer.trim().toLocaleLowerCase(); return <mark className={`fillblank-practice-mark ${pictureSubmitted && revealed ? (markCorrect ? 'blank-correct' : 'blank-incorrect') : ''}`} key={part.mark!.id}>{revealed ? part.text : part.index}</mark>; })() : <span key={`fill-text-${index}`}>{part.text}</span>)}</div><div className="fillblank-answer-list">{activeBlankMarks.map((mark, index) => {
         const correct = pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase();
         return <label className={`fillblank-answer-row ${pictureSubmitted && index < revealedCount ? (correct ? 'answer-correct' : 'answer-incorrect') : ''}`} key={mark.id}><span>{index + 1}</span><input value={pictureAnswers[mark.id] ?? ''} disabled={pictureSubmitted} onChange={event => setPictureAnswers(previous => ({ ...previous, [mark.id]: event.target.value }))} placeholder="Your answer" aria-label={`Answer blank ${index + 1}`}/>{pictureSubmitted && index < revealedCount && <small>{correct ? 'Correct' : `Answer: ${mark.answer}`}</small>}</label>;
       })}</div><div className="image-submit-row">{pictureSubmitted && revealedCount >= activeBlankMarks.length && <span>{activeBlankMarks.filter(mark => pictureAnswers[mark.id]?.trim().toLocaleLowerCase() === mark.answer.trim().toLocaleLowerCase()).length} / {activeBlankMarks.length} correct</span>}<button className="primary-button" disabled={!pictureSubmitted && activeBlankMarks.some(mark => !pictureAnswers[mark.id]?.trim())} onClick={pictureSubmitted ? mixedPractice ? nextPracticeTask : retryPicture : submitPictureAnswers}>{pictureSubmitted ? mixedPractice ? 'Next' : 'Try again' : 'Check answers'} <ArrowRight size={16}/></button></div></div> : active.image ? <>

@@ -3,6 +3,16 @@ node_modules/
 /.pnp
 .pnp.js
 
+# annoying
+.claude/
+.env.example
+Microsoft/
+SUPABASE_SETUP.md
+__pycache__/
+kizmo-backup.json
+supabase/
+tsconfig.tsbuildinfo
+
 # Production / Builds
 dist/
 build/
