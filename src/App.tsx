@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Moon, Pencil, Plus, RotateCcw, Sparkles, Sun, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, Check, ChevronDown, Download, Flower2, FolderOpen, ImagePlus, Layers3, ListChecks, Moon, Pencil, Plus, RotateCcw, Shuffle, Sparkles, Sun, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import { readSnapshot } from './storage';
 import { supabase, supabaseConfigured } from './lib/supabase';
 import { isSoundMuted, playBuzzer, playDing, playFanfare, setSoundMuted } from './sfx';
@@ -33,6 +33,9 @@ const shuffle = <T,>(items: T[]) => {
   }
   return result;
 };
+const SHUFFLE_KEY = 'kizmo-shuffle';
+const isShuffleOn = () => { try { return localStorage.getItem(SHUFFLE_KEY) === '1'; } catch { return false; } };
+const setShufflePref = (on: boolean) => { try { on ? localStorage.setItem(SHUFFLE_KEY, '1') : localStorage.removeItem(SHUFFLE_KEY); } catch { /* storage unavailable */ } };
 const choicesFor = (item: StudySet) => Object.fromEntries(item.masks.map(mask => {
   const correct = mask.answer.trim();
   if (mask.distractors?.length === 3) return [mask.id, shuffle([correct, ...mask.distractors])];
@@ -114,6 +117,8 @@ function App() {
   const [taskResults, setTaskResults] = useState<{ task: PracticeTask; wrongMaskIds: string[] }[]>([]);
   const [retryMode, setRetryMode] = useState(false);
   const [roundCount, setRoundCount] = useState(0);
+  const [shuffleOn, setShuffleOn] = useState(isShuffleOn);
+  const [shuffleOrder, setShuffleOrder] = useState<{ sets: string[]; masks: Record<string, string[]> } | null>(null);
   const [singleQuestion, setSingleQuestion] = useState(false);
   const [image, setImage] = useState('');
   const [imageRatio, setImageRatio] = useState(4 / 3);
@@ -160,6 +165,25 @@ function App() {
   const activeMask = active?.masks[cardIndex % (active.masks.length || 1)];
   const activeFolder = folders.find(folder => folder.id === folderId) ?? null;
   const folderSets = sets.filter(set => set.folderId === folderId);
+  const displaySets = (() => {
+    if (!shuffleOn || !shuffleOrder) return folderSets;
+    const setRank = new Map(shuffleOrder.sets.map((id, index) => [id, index]));
+    const maskRank = (set: StudySet) => {
+      const order = shuffleOrder.masks[set.id];
+      if (!order || set.image || set.kind === 'fillblank') return set;
+      const rank = new Map(order.map((id, index) => [id, index]));
+      return { ...set, masks: [...set.masks].sort((a, b) => (rank.get(a.id) ?? set.masks.length) - (rank.get(b.id) ?? set.masks.length)) };
+    };
+    return [...folderSets]
+      .sort((a, b) => (setRank.get(a.id) ?? folderSets.length) - (setRank.get(b.id) ?? folderSets.length))
+      .map(maskRank);
+  })();
+  const rollShuffle = () => ({
+    sets: shuffle(folderSets.map(set => set.id)),
+    masks: Object.fromEntries(folderSets
+      .filter(set => !(set.image || set.kind === 'fillblank'))
+      .map(set => [set.id, shuffle(set.masks.map(mask => mask.id))])),
+  });
   const flashcardCombinedDraft = Boolean(flashcardFrontDraft.trim()) !== Boolean(flashcardBackDraft.trim());
   const flashcardPreview = flashcardCombinedDraft
     ? parseFlashcardPaste(flashcardFrontDraft || flashcardBackDraft)
@@ -211,6 +235,11 @@ function App() {
     media.addEventListener('change', handleChange);
     return () => media.removeEventListener('change', handleChange);
   }, []);
+  useEffect(() => {
+    if (!folderId || !isShuffleOn()) { setShuffleOrder(null); return; }
+    setShuffleOrder(previous => previous ?? rollShuffle());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderId]);
   const exportBackup = async () => {
     if (!supabase) { setError('Set your Supabase URL and anon key first.'); return; }
     const [folderResult, setResult] = await Promise.all([
@@ -427,7 +456,13 @@ function App() {
     setPracticeTasks(retryTasks); setPracticeTaskIndex(0); setMixedPractice(true); loadPracticeTask(retryTasks[0]);
   };
   const startFolderPractice = () => {
-    const tasks: PracticeTask[] = folderSets.flatMap((set): PracticeTask[] => set.image || set.kind === 'flashcard' || set.kind === 'fillblank' ? [{ set, questionIndex: null }] : set.masks.map((_, questionIndex) => ({ set, questionIndex })));
+    const sectionOrder = [
+      ...displaySets.filter(set => set.image && set.kind !== 'flashcard'),
+      ...displaySets.filter(set => set.kind === 'flashcard'),
+      ...displaySets.filter(set => set.kind === 'fillblank'),
+      ...displaySets.filter(set => !set.image && set.kind !== 'flashcard' && set.kind !== 'fillblank'),
+    ];
+    const tasks: PracticeTask[] = sectionOrder.flatMap((set): PracticeTask[] => set.image || set.kind === 'flashcard' || set.kind === 'fillblank' ? [{ set, questionIndex: null }] : set.masks.map((_, questionIndex) => ({ set, questionIndex })));
     if (!tasks.length) return;
     setFolderPracticeComplete(false); setFolderScore({ correct: 0, total: 0 });
     setTaskResults([]); setRetryMode(false); setRoundCount(tasks.length);
@@ -547,6 +582,8 @@ function App() {
   };
   const retryPicture = () => { revealRunRef.current += 1; setRevealedCount(0); setPictureAnswers({}); setPictureSubmitted(false); };
   const toggleTheme = () => { const next: Theme = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); };
+  const shuffleQuestions = () => { setShuffleOn(true); setShufflePref(true); setShuffleOrder(rollShuffle()); };
+  const disableShuffle = () => { setShuffleOn(false); setShufflePref(false); setShuffleOrder(null); };
 
   return <main className="app-shell">
     <header className="topbar"><button className="brand" onClick={() => { setFolderId(null); setView('home'); }}><span className="brand-mark"><Layers3 size={19}/></span><span>kizmo<span className="brand-dot">.</span></span></button><div className="topbar-actions"><button className="round-button theme-toggle" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>{view === 'create' ? <button className="round-button" aria-label="Close editor" onClick={() => setView('folder')}><X size={19}/></button> : <span className="top-flower">✿</span>}</div></header>
@@ -566,11 +603,11 @@ function App() {
 
     {view === 'folder' && activeFolder && <section className="home-page folder-page">
       <button className="back-link" onClick={() => { setFolderId(null); setView('home'); }}><ArrowLeft size={16}/> All folders</button>
-      <div className="folder-heading"><div><span className="hello-tag"><FolderOpen size={14}/> FOLDER</span><h1>{activeFolder.title}</h1><p>{folderSets.length} {folderSets.length === 1 ? 'quiz' : 'quizzes'}</p></div><div className="folder-heading-actions"><button className="soft-button" onClick={() => { setFolderName(activeFolder.title); setFolderModal('rename'); }}><Pencil size={15}/> Rename</button><button className="soft-button" onClick={() => void setFolderArchived(activeFolder, true)}><Archive size={14}/> Archive</button><button className="soft-button" disabled={!folderSets.length} onClick={startFolderPractice}>Practice all</button><div className="new-menu-wrap"><button className="primary-button" onClick={() => setShowNewMenu(value => !value)}><Plus size={16}/> New <ChevronDown size={14}/></button>{showNewMenu && <div className="new-menu"><button onClick={() => { startCreate('quiz'); setShowNewMenu(false); }}>Quiz</button><button onClick={() => { startCreate('flashcard'); setShowNewMenu(false); }}>Flashcard</button></div>}</div></div></div>
-      {folderSets.some(item => item.image && item.kind !== 'flashcard') && <div className="folder-content-section"><h2 className="folder-type-heading">Image quizzes</h2><div className="set-grid">{folderSets.filter(item => item.image && item.kind !== 'flashcard').map(item => <article className="set-card" key={item.id}><button className="set-preview" onClick={() => startStudy(item)}><img src={item.image} alt=""/><span className="mask-count">{item.masks.length} {item.masks.length === 1 ? 'cover' : 'covers'}</span></button><div className="set-card-row set-card-actions"><button className="study-link" onClick={() => startStudy(item)}>Practice quiz <ArrowRight size={15}/></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete quiz"><Trash2 size={16}/></button></div></article>)}</div></div>}
-      {folderSets.some(item => item.kind === 'flashcard') && <div className="folder-content-section"><div className="set-grid">{folderSets.filter(item => item.kind === 'flashcard').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><Layers3 size={20}/><strong>Flashcards</strong><span>{item.masks.length} cards</span></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete flashcards"><Trash2 size={16}/></button></article>)}</div></div>}
-      {folderSets.some(item => item.kind === 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Fill in the blank</h2><div className="set-grid">{folderSets.filter(item => item.kind === 'fillblank').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><ListChecks size={20}/><strong>Passage</strong><span>{item.masks.length} blanks</span></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete fill-in-the-blank quiz"><Trash2 size={16}/></button></article>)}</div></div>}
-      {folderSets.some(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Text quizzes</h2><div className="question-list">{folderSets.filter(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank').flatMap(item => item.masks.map((question, index) => <button className="folder-question" key={`${item.id}-${question.id}`} onClick={() => startStudy(item, index)}><span className="folder-question-text">{question.question}</span><span className="folder-question-action">Answer <ArrowRight size={14}/></span></button>))}</div></div>}
+      <div className="folder-heading"><div><span className="hello-tag"><FolderOpen size={14}/> FOLDER</span><h1>{activeFolder.title}</h1><p>{folderSets.length} {folderSets.length === 1 ? 'quiz' : 'quizzes'}</p></div><div className="folder-heading-actions"><button className="soft-button" onClick={() => { setFolderName(activeFolder.title); setFolderModal('rename'); }}><Pencil size={15}/> Rename</button><button className="soft-button" onClick={() => void setFolderArchived(activeFolder, true)}><Archive size={14}/> Archive</button><button className={`soft-button ${shuffleOn ? 'is-active' : ''}`} onClick={shuffleQuestions} aria-pressed={shuffleOn}><Shuffle size={14}/> Shuffle</button>{shuffleOn && <button className="soft-button shuffle-off" onClick={disableShuffle}>Original order</button>}<button className="soft-button" disabled={!folderSets.length} onClick={startFolderPractice}>Practice all</button><div className="new-menu-wrap"><button className="primary-button" onClick={() => setShowNewMenu(value => !value)}><Plus size={16}/> New <ChevronDown size={14}/></button>{showNewMenu && <div className="new-menu"><button onClick={() => { startCreate('quiz'); setShowNewMenu(false); }}>Quiz</button><button onClick={() => { startCreate('flashcard'); setShowNewMenu(false); }}>Flashcard</button></div>}</div></div></div>
+      {displaySets.some(item => item.image && item.kind !== 'flashcard') && <div className="folder-content-section"><h2 className="folder-type-heading">Image quizzes</h2><div className="set-grid">{displaySets.filter(item => item.image && item.kind !== 'flashcard').map(item => <article className="set-card" key={item.id}><button className="set-preview" onClick={() => startStudy(item)}><img src={item.image} alt=""/><span className="mask-count">{item.masks.length} {item.masks.length === 1 ? 'cover' : 'covers'}</span></button><div className="set-card-row set-card-actions"><button className="study-link" onClick={() => startStudy(item)}>Practice quiz <ArrowRight size={15}/></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete quiz"><Trash2 size={16}/></button></div></article>)}</div></div>}
+      {displaySets.some(item => item.kind === 'flashcard') && <div className="folder-content-section"><div className="set-grid">{displaySets.filter(item => item.kind === 'flashcard').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><Layers3 size={20}/><strong>Flashcards</strong><span>{item.masks.length} cards</span></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete flashcards"><Trash2 size={16}/></button></article>)}</div></div>}
+      {displaySets.some(item => item.kind === 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Fill in the blank</h2><div className="set-grid">{displaySets.filter(item => item.kind === 'fillblank').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><ListChecks size={20}/><strong>Passage</strong><span>{item.masks.length} blanks</span></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete fill-in-the-blank quiz"><Trash2 size={16}/></button></article>)}</div></div>}
+      {displaySets.some(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Text quizzes</h2><div className="question-list">{displaySets.filter(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank').flatMap(item => item.masks.map((question, index) => <button className="folder-question" key={`${item.id}-${question.id}`} onClick={() => startStudy(item, index)}><span className="folder-question-text">{question.question}</span><span className="folder-question-action">Answer <ArrowRight size={14}/></span></button>))}</div></div>}
       {!folderSets.length && <div className="empty-card folder-empty"><div className="empty-flower">?</div><h3>This folder is empty</h3><p>Add picture quizzes and text questions here.</p><button className="primary-button" onClick={() => startCreate('quiz')}><Plus size={16}/> Create a quiz</button></div>}
     </section>}
 
