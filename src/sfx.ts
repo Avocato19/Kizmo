@@ -49,24 +49,50 @@ export const playDing = (): Promise<void> => {
   ping(now + 0.09, 1319, 0.22, 0.2);
   return wait(DING_MS);
 };
-
 export const playBuzzer = (): Promise<void> => {
   if (isSoundMuted()) return Promise.resolve();
   const ctx = getContext();
   if (!ctx) return Promise.resolve();
   const now = ctx.currentTime;
+
+  // Main tone (triangle)
   const oscillator = ctx.createOscillator();
+  oscillator.type = 'triangle';
+  oscillator.frequency.setValueAtTime(280, now);
+  oscillator.frequency.exponentialRampToValueAtTime(190, now + 0.28);
+
+  // Soft body layer (sine, one octave lower)
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(140, now);
+  sub.frequency.exponentialRampToValueAtTime(95, now + 0.28);
+
+  // Low-pass filter to keep it mellow
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(1200, now);
+  filter.Q.setValueAtTime(0.7, now);
+
+  // Envelope: louder peak, gentle attack and release
   const gain = ctx.createGain();
-  oscillator.type = 'square';
-  oscillator.frequency.setValueAtTime(160, now);
-  oscillator.frequency.exponentialRampToValueAtTime(110, now + 0.28);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-  gain.gain.setValueAtTime(0.12, now + 0.2);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
-  oscillator.connect(gain).connect(ctx.destination);
+  gain.gain.exponentialRampToValueAtTime(0.28, now + 0.04);
+  gain.gain.setValueAtTime(0.28, now + 0.2);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+  // Sub layer is quieter than the main tone
+  const subGain = ctx.createGain();
+  subGain.gain.setValueAtTime(0.5, now);
+
+  oscillator.connect(filter);
+  sub.connect(subGain).connect(filter);
+  filter.connect(gain).connect(ctx.destination);
+
   oscillator.start(now);
-  oscillator.stop(now + 0.32);
+  sub.start(now);
+  oscillator.stop(now + 0.34);
+  sub.stop(now + 0.34);
+
   return wait(BUZZER_MS);
 };
 
