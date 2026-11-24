@@ -1,0 +1,62 @@
+{
+  "package.json": {
+    "mtime": 1791121471.0318365,
+    "seen": 1792146116.1385922,
+    "ast_hash": "5f271004bd91bc235f858a86149db827",
+    "semantic_hash": "5f271004bd91bc235f858a86149db827"
+  },
+  "src/App.tsx": {
+    "mtime": 1791892726.5781772,
+    "seen": 1792146116.1386023,
+    "ast_hash": "bea446703a3a3186314162afda66a511",
+    "semantic_hash": "bea446703a3a3186314162afda66a511"
+  },
+  "src/lib/supabase.ts": {
+    "mtime": 1791122276.0625658,
+    "seen": 1792146116.1386058,
+    "ast_hash": "e6caa8501835a2cb7e862a082fef4e0c",
+    "semantic_hash": "e6caa8501835a2cb7e862a082fef4e0c"
+  },
+  "src/main.tsx": {
+    "mtime": 1791890392.433949,
+    "seen": 1792146116.1386082,
+    "ast_hash": "1307adf9750ecfe4bd56f81b415d6436",
+    "semantic_hash": "1307adf9750ecfe4bd56f81b415d6436"
+  },
+  "src/sfx.ts": {
+    "mtime": 1791731913.2130787,
+    "seen": 1792146116.1386101,
+    "ast_hash": "f1e7a0221b49479b0b4c1b74c413114e",
+    "semantic_hash": "f1e7a0221b49479b0b4c1b74c413114e"
+  },
+  "src/storage.ts": {
+    "mtime": 1791120287.4338684,
+    "seen": 1792146116.138612,
+    "ast_hash": "59547c833ea862b22d88a7623045f22d",
+    "semantic_hash": "59547c833ea862b22d88a7623045f22d"
+  },
+  "src/theme.ts": {
+    "mtime": 1791890145.7560935,
+    "seen": 1792146116.138614,
+    "ast_hash": "ef05777fbc37652fa3288a51859d7416",
+    "semantic_hash": "ef05777fbc37652fa3288a51859d7416"
+  },
+  "src/vite-env.d.ts": {
+    "mtime": 1791113617.1142156,
+    "seen": 1792146116.1386158,
+    "ast_hash": "0352474ba2918efe13895edbc3780d94",
+    "semantic_hash": "0352474ba2918efe13895edbc3780d94"
+  },
+  "tsconfig.json": {
+    "mtime": 1791106589.2121427,
+    "seen": 1792146116.1386173,
+    "ast_hash": "259d35fb7cdfd80a4354668d66f5b8fc",
+    "semantic_hash": "259d35fb7cdfd80a4354668d66f5b8fc"
+  },
+  "vite.config.js": {
+    "mtime": 1791127107.3388145,
+    "seen": 1792146116.1386194,
+    "ast_hash": "29ed4bae03ddd521af082daeba98266a",
+    "semantic_hash": "29ed4bae03ddd521af082daeba98266a"
+  }
+}

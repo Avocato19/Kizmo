@@ -6,14 +6,20 @@ import { isSoundMuted, playBuzzer, playDing, playFanfare, setSoundMuted } from '
 import { applyTheme, currentTheme, getStoredTheme, systemTheme, type Theme } from './theme';
 
 type Mask = { id: string; x: number; y: number; w: number; h: number; answer: string; question?: string; start?: number; end?: number; distractors?: string[] };
-type StudySet = { id: string; title: string; image: string; masks: Mask[]; createdAt: string; folderId: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string };
+type StudySet = { id: string; title: string; image: string; masks: Mask[]; createdAt: string; folderId: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string; difficulty?: Difficulty | null };
 type StudyFolder = { id: string; title: string; createdAt: string; archived?: boolean };
 type PracticeTask = { set: StudySet; questionIndex: number | null };
 type View = 'home' | 'folder' | 'create' | 'study';
 type Point = { x: number; y: number };
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
 type MaskEdit = { id: string; mode: 'move' | 'resize'; corner?: Corner; start: Point; original: Mask };
+type Difficulty = 'easy' | 'medium' | 'hard';
 const corners: Corner[] = ['nw', 'ne', 'sw', 'se'];
+const difficultyOptions: { value: Difficulty; label: string; hint: string }[] = [
+  { value: 'easy', label: 'Easy', hint: 'Recall facts and definitions' },
+  { value: 'medium', label: 'Medium', hint: 'Connect and compare ideas' },
+  { value: 'hard', label: 'Hard', hint: 'Apply, analyze and infer' },
+];
 const flashcardCheers = ['Goodjob babyyy🥰', 'Gooo my beloved wifey😘', 'I love you babyyy😍', "You're doing good, my love🥰"];
 const randomFlashcardCheer = (previous?: string) => {
   const options = flashcardCheers.filter(message => message !== previous);
@@ -42,9 +48,10 @@ const choicesFor = (item: StudySet) => Object.fromEntries(item.masks.map(mask =>
 }));
 
 const folderFromRow = (row: { id: string; title: string; created_at: string; archived: boolean }): StudyFolder => ({ id: row.id, title: row.title, createdAt: row.created_at, archived: row.archived });
-const setFromRow = (row: { id: string; title: string; image: string; masks: Mask[]; created_at: string; folder_id: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string }): StudySet => ({ id: row.id, title: row.title, image: row.image, masks: row.masks, createdAt: row.created_at, folderId: row.folder_id, kind: row.kind ?? 'quiz', content: row.content ?? '' });
+const parseDifficulty = (value?: string | null): Difficulty | null => value === 'easy' || value === 'medium' || value === 'hard' ? value : null;
+const setFromRow = (row: { id: string; title: string; image: string; masks: Mask[]; created_at: string; folder_id: string; kind?: 'quiz' | 'flashcard' | 'fillblank'; content?: string; difficulty?: string | null }): StudySet => ({ id: row.id, title: row.title, image: row.image, masks: row.masks, createdAt: row.created_at, folderId: row.folder_id, kind: row.kind ?? 'quiz', content: row.content ?? '', difficulty: parseDifficulty(row.difficulty) });
 const folderToRow = (folder: StudyFolder) => ({ id: folder.id, title: folder.title, created_at: folder.createdAt, archived: Boolean(folder.archived) });
-const setToRow = (item: StudySet) => ({ id: item.id, title: item.title, image: item.image, masks: item.masks, created_at: item.createdAt, folder_id: item.folderId, kind: item.kind ?? 'quiz', content: item.content ?? '' });
+const setToRow = (item: StudySet) => ({ id: item.id, title: item.title, image: item.image, masks: item.masks, created_at: item.createdAt, folder_id: item.folderId, kind: item.kind ?? 'quiz', content: item.content ?? '', ...(item.difficulty ? { difficulty: item.difficulty } : {}) });
 const parseFlashcardPaste = (source: string) => {
   const fronts: string[] = [];
   const backLines: string[] = [];
@@ -96,6 +103,12 @@ function ConfettiCelebration() {
   />)}</div>;
 }
 
+function DifficultyChip({ level, compact = false }: { level?: Difficulty | null; compact?: boolean }) {
+  if (!level) return null;
+  const label = level === 'easy' ? 'Easy' : level === 'medium' ? 'Medium' : 'Hard';
+  return <span className={`difficulty-chip is-${level}${compact ? ' is-compact' : ''}`} title={`${label} difficulty`}>{label}</span>;
+}
+
 function App() {
   const [sets, setSets] = useState<StudySet[]>([]);
   const [folders, setFolders] = useState<StudyFolder[]>([]);
@@ -144,6 +157,8 @@ function App() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfQuestionMode, setPdfQuestionMode] = useState<'auto' | 'count'>('count');
   const [pdfQuestionCount, setPdfQuestionCount] = useState('10');
+  const [pdfDifficulty, setPdfDifficulty] = useState<Difficulty>('medium');
+  const [generatedDifficulty, setGeneratedDifficulty] = useState<Difficulty | null>(null);
   const [generatingPdfQuiz, setGeneratingPdfQuiz] = useState(false);
   const [soundMuted, setSoundMutedState] = useState(isSoundMuted);
   const [theme, setTheme] = useState<Theme>(() => currentTheme());
@@ -183,7 +198,7 @@ function App() {
       if (!supabaseConfigured || !supabase) throw new Error('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to connect Supabase.');
       const [folderResult, setResult] = await Promise.all([
         supabase.from('folders').select('id,title,created_at,archived').order('created_at', { ascending: false }),
-        supabase.from('study_sets').select('id,title,image,masks,created_at,folder_id,kind,content').order('created_at', { ascending: false }),
+        supabase.from('study_sets').select('id,title,image,masks,created_at,folder_id,kind,content,difficulty').order('created_at', { ascending: false }),
       ]);
       if (folderResult.error) throw folderResult.error;
       if (setResult.error) throw setResult.error;
@@ -215,7 +230,7 @@ function App() {
     if (!supabase) { setError('Set your Supabase URL and anon key first.'); return; }
     const [folderResult, setResult] = await Promise.all([
       supabase.from('folders').select('id,title,created_at,archived'),
-      supabase.from('study_sets').select('id,title,image,masks,created_at,folder_id,kind,content'),
+      supabase.from('study_sets').select('id,title,image,masks,created_at,folder_id,kind,content,difficulty'),
     ]);
     if (folderResult.error || setResult.error) { setError(folderResult.error?.message ?? setResult.error?.message ?? 'Could not export data.'); return; }
     const snapshot = { folders: (folderResult.data ?? []).map(folderFromRow), sets: (setResult.data ?? []).map(setFromRow) };
@@ -241,10 +256,10 @@ function App() {
   const startCreate = (kind: 'quiz' | 'flashcard' = 'quiz') => {
     if (!folderId) { setError('Open a folder first.'); return; }
     setImage(''); setMasks([]); setSelectedMask(null);
-    setQuestionDraft(''); setAnswerDraft(''); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setSelectedTextRange(null); setPdfFile(null); setPdfQuestionMode('count'); setPdfQuestionCount('10'); setCreateKind(kind); setQuizType('picture'); setView('create'); setError('');
+    setQuestionDraft(''); setAnswerDraft(''); setFlashcardFrontDraft(''); setFlashcardBackDraft(''); setBlankTextDraft(''); setConfirmedBlankText(''); setBlankTextConfirmed(false); setSelectedTextRange(null); setPdfFile(null); setPdfQuestionMode('count'); setPdfQuestionCount('10'); setPdfDifficulty('medium'); setGeneratedDifficulty(null); setCreateKind(kind); setQuizType('picture'); setView('create'); setError('');
   };
   const changeQuizType = (type: 'picture' | 'text' | 'fillblank') => {
-    setQuizType(type); setImage(''); setMasks([]); setSelectedMask(null); setError('');
+    setQuizType(type); setImage(''); setMasks([]); setSelectedMask(null); if (type !== 'text') setGeneratedDifficulty(null); setError('');
   };
   const handleImage = (file?: File) => {
     if (!file) return;
@@ -318,7 +333,7 @@ function App() {
     try {
       const { data, error: invokeError } = await supabase.functions.invoke('generate-pdf-quiz', {
         body: await pdfFile.arrayBuffer(),
-        headers: { 'Content-Type': 'application/pdf', 'x-question-count': pdfQuestionMode === 'auto' ? 'auto' : String(parsedCount) },
+        headers: { 'Content-Type': 'application/pdf', 'x-question-count': pdfQuestionMode === 'auto' ? 'auto' : String(parsedCount), 'x-difficulty': pdfDifficulty },
         timeout: 180_000,
       });
       if (invokeError) {
@@ -332,6 +347,7 @@ function App() {
       const questions = (data as { questions?: { question: string; answer: string; choices?: string[] }[] })?.questions;
       if (!Array.isArray(questions) || questions.length === 0) throw new Error('No questions were generated. Try a different PDF.');
       setMasks(questions.map(item => ({ id: crypto.randomUUID(), x: 0, y: 0, w: 0, h: 0, question: item.question, answer: item.answer, ...(Array.isArray(item.choices) && item.choices.length === 3 ? { distractors: item.choices } : {}) })));
+      setGeneratedDifficulty(parseDifficulty((data as { difficulty?: string })?.difficulty) ?? pdfDifficulty);
       setQuizType('text'); setPdfFile(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not generate questions from that PDF.');
@@ -382,7 +398,7 @@ function App() {
     if (createKind === 'quiz' && quizType === 'picture' && !image) { setError('Add an image first.'); return; }
     if (!folderId) { setError('Open a folder first.'); return; }
     setSaving(true); setError('');
-    const item: StudySet = { id: crypto.randomUUID(), title: '', image: createKind === 'quiz' && quizType === 'picture' ? image : '', masks: cards, createdAt: new Date().toISOString(), folderId, kind: createKind === 'flashcard' ? 'flashcard' : fillBlankMode ? 'fillblank' : 'quiz', content: fillBlankMode ? confirmedBlankText : '' };
+    const item: StudySet = { id: crypto.randomUUID(), title: '', image: createKind === 'quiz' && quizType === 'picture' ? image : '', masks: cards, createdAt: new Date().toISOString(), folderId, kind: createKind === 'flashcard' ? 'flashcard' : fillBlankMode ? 'fillblank' : 'quiz', content: fillBlankMode ? confirmedBlankText : '', difficulty: quizType === 'text' ? generatedDifficulty : null };
     try {
       if (!supabase) throw new Error('Set your Supabase URL and anon key first.');
       const result = await supabase.from('study_sets').insert(setToRow(item)); if (result.error) throw result.error;
@@ -567,10 +583,10 @@ function App() {
     {view === 'folder' && activeFolder && <section className="home-page folder-page">
       <button className="back-link" onClick={() => { setFolderId(null); setView('home'); }}><ArrowLeft size={16}/> All folders</button>
       <div className="folder-heading"><div><span className="hello-tag"><FolderOpen size={14}/> FOLDER</span><h1>{activeFolder.title}</h1><p>{folderSets.length} {folderSets.length === 1 ? 'quiz' : 'quizzes'}</p></div><div className="folder-heading-actions"><button className="soft-button" onClick={() => { setFolderName(activeFolder.title); setFolderModal('rename'); }}><Pencil size={15}/> Rename</button><button className="soft-button" onClick={() => void setFolderArchived(activeFolder, true)}><Archive size={14}/> Archive</button><button className="soft-button" disabled={!folderSets.length} onClick={startFolderPractice}>Practice all</button><div className="new-menu-wrap"><button className="primary-button" onClick={() => setShowNewMenu(value => !value)}><Plus size={16}/> New <ChevronDown size={14}/></button>{showNewMenu && <div className="new-menu"><button onClick={() => { startCreate('quiz'); setShowNewMenu(false); }}>Quiz</button><button onClick={() => { startCreate('flashcard'); setShowNewMenu(false); }}>Flashcard</button></div>}</div></div></div>
-      {folderSets.some(item => item.image && item.kind !== 'flashcard') && <div className="folder-content-section"><h2 className="folder-type-heading">Image quizzes</h2><div className="set-grid">{folderSets.filter(item => item.image && item.kind !== 'flashcard').map(item => <article className="set-card" key={item.id}><button className="set-preview" onClick={() => startStudy(item)}><img src={item.image} alt=""/><span className="mask-count">{item.masks.length} {item.masks.length === 1 ? 'cover' : 'covers'}</span></button><div className="set-card-row set-card-actions"><button className="study-link" onClick={() => startStudy(item)}>Practice quiz <ArrowRight size={15}/></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete quiz"><Trash2 size={16}/></button></div></article>)}</div></div>}
-      {folderSets.some(item => item.kind === 'flashcard') && <div className="folder-content-section"><div className="set-grid">{folderSets.filter(item => item.kind === 'flashcard').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><Layers3 size={20}/><strong>Flashcards</strong><span>{item.masks.length} cards</span></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete flashcards"><Trash2 size={16}/></button></article>)}</div></div>}
+      {folderSets.some(item => item.image && item.kind !== 'flashcard') && <div className="folder-content-section"><h2 className="folder-type-heading">Image quizzes</h2><div className="set-grid">{folderSets.filter(item => item.image && item.kind !== 'flashcard').map(item => <article className="set-card" key={item.id}><button className="set-preview" onClick={() => startStudy(item)}><img src={item.image} alt=""/><span className="mask-count">{item.masks.length} {item.masks.length === 1 ? 'cover' : 'covers'}</span></button><div className="set-card-row set-card-actions"><DifficultyChip level={item.difficulty}/><button className="study-link" onClick={() => startStudy(item)}>Practice quiz <ArrowRight size={15}/></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete quiz"><Trash2 size={16}/></button></div></article>)}</div></div>}
+      {folderSets.some(item => item.kind === 'flashcard') && <div className="folder-content-section"><div className="set-grid">{folderSets.filter(item => item.kind === 'flashcard').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><Layers3 size={20}/><strong>Flashcards</strong><span>{item.masks.length} cards</span></button><DifficultyChip level={item.difficulty} compact/><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete flashcards"><Trash2 size={16}/></button></article>)}</div></div>}
       {folderSets.some(item => item.kind === 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Fill in the blank</h2><div className="set-grid">{folderSets.filter(item => item.kind === 'fillblank').map(item => <article className="flashcard-deck" key={item.id}><button className="flashcard-deck-open" onClick={() => startStudy(item)}><ListChecks size={20}/><strong>Passage</strong><span>{item.masks.length} blanks</span></button><button className="icon-action delete-action" onClick={() => void deleteSet(item.id)} aria-label="Delete fill-in-the-blank quiz"><Trash2 size={16}/></button></article>)}</div></div>}
-      {folderSets.some(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Text quizzes</h2><div className="question-list">{folderSets.filter(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank').flatMap(item => item.masks.map((question, index) => <button className="folder-question" key={`${item.id}-${question.id}`} onClick={() => startStudy(item, index)}><span className="folder-question-text">{question.question}</span><span className="folder-question-action">Answer <ArrowRight size={14}/></span></button>))}</div></div>}
+      {folderSets.some(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank') && <div className="folder-content-section"><h2 className="folder-type-heading">Text quizzes</h2><div className="question-list">{folderSets.filter(item => !item.image && item.kind !== 'flashcard' && item.kind !== 'fillblank').flatMap(item => item.masks.map((question, index) => <button className="folder-question" key={`${item.id}-${question.id}`} onClick={() => startStudy(item, index)}><span className="folder-question-text">{question.question}</span><span className="folder-question-action"><DifficultyChip level={item.difficulty} compact/>Answer <ArrowRight size={14}/></span></button>))}</div></div>}
       {!folderSets.length && <div className="empty-card folder-empty"><div className="empty-flower">?</div><h3>This folder is empty</h3><p>Add picture quizzes and text questions here.</p><button className="primary-button" onClick={() => startCreate('quiz')}><Plus size={16}/> Create a quiz</button></div>}
     </section>}
 
@@ -615,6 +631,8 @@ function App() {
         <div className="text-builder">
           <div className="pdf-import-panel">
             <div><strong>Make questions from a PDF</strong><span>Choose a study guide and AI will draft questions with answers.</span></div>
+            <div className="pdf-difficulty"><span className="pdf-difficulty-label" id="pdf-difficulty-label">Difficulty</span><div className="difficulty-switch" role="radiogroup" aria-labelledby="pdf-difficulty-label">{difficultyOptions.map((option, index) => <button type="button" key={option.value} role="radio" aria-checked={pdfDifficulty === option.value} className={`difficulty-option ${pdfDifficulty === option.value ? 'active' : ''}`} onClick={() => setPdfDifficulty(option.value)} disabled={generatingPdfQuiz} title={option.hint}><span className="difficulty-dots" aria-hidden="true">{[0, 1, 2].map(dot => <i key={dot} className={dot <= index ? 'on' : ''}/>)}</span>{option.label}</button>)}</div></div>
+            <p className="pdf-difficulty-hint" aria-live="polite">{difficultyOptions.find(option => option.value === pdfDifficulty)?.hint}</p>
             <input ref={pdfRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={event => { const file = event.target.files?.[0] ?? null; setPdfFile(file); setError(file && file.size > 8 * 1024 * 1024 ? 'Choose a PDF smaller than 8 MB.' : ''); event.currentTarget.value = ''; }} />
             <div className="pdf-import-controls"><button className="soft-button" onClick={() => pdfRef.current?.click()} disabled={generatingPdfQuiz}><Upload size={15}/>{pdfFile ? pdfFile.name : 'Choose PDF'}</button><label>Questions<select value={pdfQuestionMode} onChange={event => setPdfQuestionMode(event.target.value as 'auto' | 'count')} disabled={generatingPdfQuiz}><option value="auto">AI decides</option><option value="count">Number</option></select></label>{pdfQuestionMode === 'count' && <input className="pdf-count-input" type="number" min={1} max={300} step={1} value={pdfQuestionCount} onChange={event => setPdfQuestionCount(event.target.value)} disabled={generatingPdfQuiz} aria-label="Number of questions" />}<button className="primary-button" onClick={() => void generatePdfQuiz()} disabled={!pdfFile || pdfFile.size > 8 * 1024 * 1024 || generatingPdfQuiz}>{generatingPdfQuiz ? 'Making questions…' : 'Generate'}</button></div>
             <small>Your PDF is sent to Gemini, including scanned pages. The free tier may use submitted content to improve Google products. Kizmo saves only the quiz, not the PDF.</small>
